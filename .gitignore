@@ -1,3 +1,8 @@
 
 *.csv
 *.zip
+*.parquet
+/graphify-out
+CLAUDE.md
+/.claude
+/__pycache__

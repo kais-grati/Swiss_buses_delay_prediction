@@ -30,6 +30,9 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+STAC_BASE  = "https://data.geo.admin.ch/api/stac/v0.9"
+COLLECTION = "ch.meteoschweiz.ogd-smn"
+
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 API_BASE   = "https://archive-api.open-meteo.com/v1/archive"
@@ -160,13 +163,46 @@ def fetch_station(station: dict) -> tuple[str, int, str | None]:
             pq_path.unlink()
         return sid, -1, str(e)
 
+# ── Station discovery (generates station_metadata.parquet if missing) ──────────
+
+def get_stations() -> list[dict]:
+    if META_INPUT.exists():
+        meta = pq.read_table(META_INPUT).to_pandas()
+        log.info(f"Loaded {len(meta)} stations from {META_INPUT}")
+        return meta[["station_id", "lat", "lon"]].dropna().to_dict("records")
+
+    log.info("station_metadata.parquet not found — fetching from MeteoSwiss STAC API...")
+    stations, url, params = [], f"{STAC_BASE}/collections/{COLLECTION}/items", {"limit": 100}
+    while url:
+        r = SESSION.get(url, params=params, timeout=60)
+        r.raise_for_status()
+        data = r.json()
+        for feature in data.get("features", []):
+            coords = feature.get("geometry", {}).get("coordinates", [])
+            props  = feature.get("properties", {})
+            if len(coords) >= 2:
+                stations.append({
+                    "station_id": feature["id"],
+                    "name":       props.get("title", feature["id"]),
+                    "lon":        coords[0],
+                    "lat":        coords[1],
+                    "alt":        coords[2] if len(coords) > 2 else None,
+                })
+        url    = next((l["href"] for l in data.get("links", []) if l.get("rel") == "next"), None)
+        params = {}
+
+    meta_df = pd.DataFrame(stations)
+    pq.write_table(pa.Table.from_pandas(meta_df, preserve_index=False), META_INPUT, compression="snappy")
+    log.info(f"Saved {META_INPUT} ({len(stations)} stations)")
+    return meta_df[["station_id", "lat", "lon"]].dropna().to_dict("records")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
     CACHE_DIR.mkdir(exist_ok=True)
 
-    meta     = pq.read_table(META_INPUT).to_pandas()
-    stations = meta[["station_id", "lat", "lon"]].dropna().to_dict("records")
+    stations = get_stations()
     log.info(f"Fetching hourly weather for {len(stations)} stations")
 
     todo  = [s for s in stations if not (CACHE_DIR / f"{s['station_id']}.parquet").exists()]

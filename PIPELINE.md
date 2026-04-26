@@ -139,7 +139,7 @@ Output schema:
 | `stop_id` | int32 | BPUIC stop number |
 | `stop_name` | string | Stop name |
 | `additional_trip` | bool | Unscheduled extra trip |
-| `pass_through` | bool | No stop made |
+| `pass_through` | bool | No stop made (filtered out in Step 6) |
 | `arrival_delay_s` | int32 | Arrival delay in seconds (nullable) |
 | `departure_delay_s` | int32 | Departure delay in seconds (nullable) |
 
@@ -174,13 +174,13 @@ Weather variables (hourly):
 |--------|-------------|------|
 | `temperature` | Air temperature 2m | °C |
 | `precipitation` | Rainfall + snowfall | mm |
-| `sunshine` | Sunshine duration | seconds/hour (0–3600) |
+| `sunshine` | Fraction of the hour with sunshine | 0–1 |
 | `humidity` | Relative humidity 2m | % |
-| `wind_speed` | Wind speed at 10m | km/h |
-| `wind_gust` | Wind gust at 10m | km/h |
+| `wind_speed` | Wind speed at 10m | m/s |
+| `wind_gust` | Wind gust at 10m | m/s |
 | `wind_dir` | Wind direction at 10m | ° |
 | `pressure` | Surface pressure | hPa |
-| `snow_depth` | Snow depth | cm |
+| `snow_depth` | Snow depth | m |
 
 Runs sequentially (1 worker) with a 1-second gap between requests to respect
 the free-tier rate limit. ~3 minutes total for all 158 stations.
@@ -200,25 +200,28 @@ python fetch_weather_hourly.py
 
 Three sub-steps:
 
-**7a. Stop → nearest MeteoSwiss station mapping**
+**6a. Stop → nearest MeteoSwiss station mapping**
 
 Loads all 28,982 bus stop coordinates from `station_data.parquet` (Swiss LV95
 grid, EPSG:2056), converts them to WGS84 (lat/lon) using `pyproj`, then uses
 a `scipy` KDTree to find the nearest of the 158 MeteoSwiss stations for each
 stop. Result: a `{bpuic → station_id}` dictionary held in memory.
 
-**7b. Weather lookup table**
+**6b. Weather lookup table**
 
 Loads `weather_hourly.parquet` (~80 MB) fully into RAM, indexed by
 `(station_id, timestamp)` where timestamp is UTC-naive, floored to the hour.
 
-**7c. Chunked join**
+**6c. Filtered join**
 
-Reads `dataset.parquet` in 2M-row batches:
-1. Maps `stop_id` → `meteoswiss_station_id` via the dictionary from 7a
-2. Converts `timestamp` from Swiss local time (`Europe/Zurich`) to UTC, floors to hour
-3. Left-joins with the weather table on `(station_id, utc_hour)`
-4. Appends weather columns to the batch and writes to output
+Reads `dataset.parquet` via DuckDB streaming:
+1. **Excludes pass-through rows** (`WHERE NOT pass_through`) — stops where the
+   bus never opens its doors have no meaningful delay to predict.
+2. **Drops the `pass_through` column** from the output (all remaining rows are
+   `pass_through = FALSE`).
+3. Maps `stop_id` → `meteoswiss_station_id` via the dictionary from 6a.
+4. Converts `timestamp` from Swiss local time (`Europe/Zurich`) to UTC, floors to hour.
+5. Left-joins with the weather table on `(station_id, utc_hour)`.
 
 Adds these columns to the dataset (all float32):
 `temperature`, `precipitation`, `sunshine`, `humidity`,
@@ -246,9 +249,21 @@ python to_parquet.py --workers 4
 # 5: fetch hourly weather (run once, resume-safe)
 python fetch_weather_hourly.py
 
-# 6: join everything
+# 6: join everything (pass-through rows excluded automatically)
 python add_weather.py
 ```
+
+### Utility: clean an existing dataset_with_weather.parquet
+
+If `dataset_with_weather.parquet` was generated before the pass-through filter
+was added to `add_weather.py`, run this once to remove those rows in-place:
+
+```bash
+python drop_pass_through.py
+```
+
+Uses DuckDB streaming — the full file is never loaded into RAM. Writes to a
+`.tmp` file first, verifies the row count, then atomically replaces the original.
 
 ## Output Files
 

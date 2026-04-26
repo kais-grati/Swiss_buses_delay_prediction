@@ -11,13 +11,13 @@ Cache:   weather_hourly_cache/     (one parquet per station, resume-safe)
 Columns per row (hourly):
   temperature   — air temperature 2m (°C)
   precipitation — rainfall + snowfall (mm)
-  sunshine      — sunshine duration (seconds per hour, 0–3600)
+  sunshine      — sunshine fraction of the hour (0–1)
   humidity      — relative humidity 2m (%)
-  wind_speed    — wind speed at 10m (km/h)
-  wind_gust     — wind gust at 10m (km/h)
+  wind_speed    — wind speed at 10m (m/s)
+  wind_gust     — wind gust at 10m (m/s)
   wind_dir      — wind direction at 10m (°)
   pressure      — surface pressure (hPa)
-  snow_depth    — snow depth (cm)
+  snow_depth    — snow depth (m)
 """
 
 import time
@@ -150,8 +150,11 @@ def fetch_station(station: dict) -> tuple[str, int, str | None]:
             vals = hourly.get(var, [None] * len(timestamps))
             df[col] = pd.array(vals, dtype="Float64").astype("float32")
 
-        # Open-Meteo returns snow_depth in metres → convert to cm
-        df["snow_depth"] = df["snow_depth"] * 100
+        # Unit normalisations
+        df["sunshine"]   = df["sunshine"]   / 3600.0   # seconds/hour → fraction 0-1
+        df["wind_speed"] = df["wind_speed"] / 3.6      # km/h → m/s
+        df["wind_gust"]  = df["wind_gust"]  / 3.6      # km/h → m/s
+        # snow_depth: Open-Meteo returns metres — keep as metres (no conversion)
 
         ordered_cols = ["station_id", "timestamp"] + list(VAR_RENAME.values())
         table = pa.Table.from_pandas(df[ordered_cols], schema=OUTPUT_SCHEMA, preserve_index=False)

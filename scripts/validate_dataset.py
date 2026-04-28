@@ -14,7 +14,10 @@ Exit code: 0 if all tests pass, 1 if any FAIL.
 
 import sys
 import argparse
+from pathlib import Path
 import duckdb
+
+_DATA = Path(__file__).resolve().parent.parent / "data"
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -261,13 +264,12 @@ def main():
     parser.add_argument("file", nargs="?", help="Parquet file to validate")
     args = parser.parse_args()
 
-    from pathlib import Path
     if args.file:
         target = Path(args.file)
-    elif Path("dataset_with_weather.parquet").exists():
-        target = Path("dataset_with_weather.parquet")
-    elif Path("dataset.parquet").exists():
-        target = Path("dataset.parquet")
+    elif (_DATA / "dataset_with_weather.parquet").exists():
+        target = _DATA / "dataset_with_weather.parquet"
+    elif (_DATA / "dataset.parquet").exists():
+        target = _DATA / "dataset.parquet"
     else:
         print("No dataset parquet found. Pass a path explicitly.")
         sys.exit(1)

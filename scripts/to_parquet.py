@@ -2,6 +2,7 @@ import os
 import sys
 import shutil
 import argparse
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -9,10 +10,11 @@ import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
 from multiprocessing import Pool, cpu_count
 
-DATA_DIR   = "cleaned_data"
-TMP_DIR    = "cleaned_data_parquet_tmp"
-OUTPUT     = "dataset.parquet"
-TMP_OUTPUT = OUTPUT + ".tmp"
+ROOT       = Path(__file__).resolve().parent.parent
+DATA_DIR   = ROOT / "data" / "cleaned_data"
+TMP_DIR    = ROOT / "data" / "cleaned_data_parquet_tmp"
+OUTPUT     = ROOT / "data" / "dataset.parquet"
+TMP_OUTPUT = Path(str(OUTPUT) + ".tmp")
 
 TAU = 2 * np.pi
 

@@ -9,7 +9,8 @@ from pathlib import Path
 
 import duckdb
 
-TARGET = Path("dataset_with_weather.parquet")
+_DATA  = Path(__file__).resolve().parent.parent / "data"
+TARGET = _DATA / "dataset_with_weather.parquet"
 TMP    = TARGET.with_suffix(".tmp.parquet")
 
 

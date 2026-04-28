@@ -1,5 +1,6 @@
 import os
 import glob
+from pathlib import Path
 import pandas as pd
 
 COLUMN_MAPPING = {
@@ -26,7 +27,7 @@ COLUMN_MAPPING = {
     "DURCHFAHRT_TF": "PASS_THROUGH",
 }
 
-FOLDER = "./data" 
+FOLDER = Path(__file__).resolve().parent.parent / "data" / "raw"
 i=0
 
 for filepath in glob.glob(os.path.join(FOLDER, "*.csv")):

@@ -31,13 +31,14 @@ from tqdm import tqdm
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
-DATASET_IN     = Path("dataset.parquet")
-DATASET_OUT    = Path("dataset_with_weather.parquet")
-STATION_DATA   = Path("station_data.parquet")
-STATION_META   = Path("station_metadata.parquet")
-WEATHER_HOURLY = Path("weather_hourly.parquet")
-STOP_MAP_TMP   = Path("_stop_map_tmp.parquet")
-HOLIDAYS_TMP   = Path("_holidays_tmp.parquet")
+_DATA          = Path(__file__).resolve().parent.parent / "data"
+DATASET_IN     = _DATA / "dataset.parquet"
+DATASET_OUT    = _DATA / "dataset_with_weather.parquet"
+STATION_DATA   = _DATA / "station_data.parquet"
+STATION_META   = _DATA / "station_metadata.parquet"
+WEATHER_HOURLY = _DATA / "weather_hourly.parquet"
+STOP_MAP_TMP   = _DATA / "_stop_map_tmp.parquet"
+HOLIDAYS_TMP   = _DATA / "_holidays_tmp.parquet"
 
 WEATHER_COLS = [
     "temperature", "precipitation", "sunshine", "humidity",

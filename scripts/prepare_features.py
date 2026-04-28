@@ -1,7 +1,9 @@
 import os
+from pathlib import Path
 from multiprocessing import Pool, cpu_count
 
-DATA_DIR = "cleaned_data"
+ROOT     = Path(__file__).resolve().parent.parent
+DATA_DIR = ROOT / "data" / "cleaned_data"
 
 KEEP_COLS = {
     "DATE",

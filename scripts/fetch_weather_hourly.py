@@ -36,9 +36,10 @@ COLLECTION = "ch.meteoschweiz.ogd-smn"
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 API_BASE   = "https://archive-api.open-meteo.com/v1/archive"
-META_INPUT = Path("station_metadata.parquet")
-CACHE_DIR  = Path("weather_hourly_cache")
-OUTPUT     = Path("weather_hourly.parquet")
+_DATA      = Path(__file__).resolve().parent.parent / "data"
+META_INPUT = _DATA / "station_metadata.parquet"
+CACHE_DIR  = _DATA / "weather_hourly_cache"
+OUTPUT     = _DATA / "weather_hourly.parquet"
 YEAR       = 2025
 MAX_WORKERS  = 1    # free tier rate-limits concurrent requests
 TIMEOUT      = 60

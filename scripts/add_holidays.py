@@ -21,10 +21,11 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from tqdm import tqdm
 
-DATASET     = Path("dataset_with_weather.parquet")
-STATION_DATA = Path("station_data.parquet")
-STOP_MAP_TMP = Path("_stop_map_tmp.parquet")
-HOLIDAYS_TMP = Path("_holidays_tmp.parquet")
+_DATA        = Path(__file__).resolve().parent.parent / "data"
+DATASET      = _DATA / "dataset_with_weather.parquet"
+STATION_DATA = _DATA / "station_data.parquet"
+STOP_MAP_TMP = _DATA / "_stop_map_tmp.parquet"
+HOLIDAYS_TMP = _DATA / "_holidays_tmp.parquet"
 
 
 def build_stop_canton_map() -> None:

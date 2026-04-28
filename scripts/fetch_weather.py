@@ -39,9 +39,10 @@ import pyarrow.parquet as pq
 
 STAC_BASE   = "https://data.geo.admin.ch/api/stac/v0.9"
 COLLECTION  = "ch.meteoschweiz.ogd-smn"
-CACHE_DIR   = Path("weather_cache")       # raw CSVs + per-station parquets
-OUTPUT      = Path("weather_2025.parquet")
-META_OUTPUT = Path("station_metadata.parquet")
+_DATA       = Path(__file__).resolve().parent.parent / "data"
+CACHE_DIR   = _DATA / "weather_cache"
+OUTPUT      = _DATA / "weather_2025.parquet"
+META_OUTPUT = _DATA / "station_metadata.parquet"
 YEAR        = 2025
 MAX_WORKERS = 8
 TIMEOUT     = 120   # seconds per HTTP request

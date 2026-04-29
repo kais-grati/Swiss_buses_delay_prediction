@@ -17,7 +17,11 @@ data/*.csv  (raw, German headers, all transport modes)
     │
     ├─ 5. fetch_weather_hourly.py→ hourly Open-Meteo weather→  weather_hourly.parquet
     │                                                           station_metadata.parquet
-    └─ 6. add_weather.py         → join weather to dataset  →  dataset_with_weather.parquet
+    ├─ 6. add_weather.py         → join weather to dataset  →  dataset_with_weather.parquet
+    ├─ 7. add_holidays.py        → add is_public_holiday    →  dataset_with_weather.parquet (in-place)
+    ├─ 8. drop_outlier_delays.py → remove delay > 30 min   →  dataset_with_weather.parquet (in-place)
+    ├─ 9. drop_early_outliers.py  → remove delay < -2 min  →  dataset_with_weather.parquet (in-place)
+    └─10. drop_missing_weather.py → remove missing weather →  dataset_with_weather.parquet (in-place)
 ```
 
 ---
@@ -235,6 +239,79 @@ python add_weather.py
 
 ---
 
+## Step 7 — Add Public Holidays → dataset_with_weather.parquet
+
+**Script:** `add_holidays.py`  
+**Input:** `dataset_with_weather.parquet`, `station_data.parquet`  
+**Output:** `dataset_with_weather.parquet` (in-place, adds `is_public_holiday` column)
+
+Three sub-steps:
+
+1. **Stop → canton mapping** — loads `station_data.parquet`, maps each `stop_id` (BPUIC) to its Swiss canton abbreviation (e.g. `VD`, `ZH`). Writes a temporary `_stop_map_tmp.parquet`.
+2. **Holiday table** — uses the `holidays` library to generate all canton-specific Swiss public holidays for each year present in the dataset. Writes `_holidays_tmp.parquet`.
+3. **Join** — DuckDB streaming join: `dataset ⟕ stop_map ⟕ holidays` on `(stop_id → canton, DATE(timestamp) = holiday_date)`. Sets `is_public_holiday = TRUE` for matching rows, `FALSE` otherwise. Verifies row count before atomically replacing the original file.
+
+Temporary files are cleaned up on exit (even on failure).
+
+Run:
+```bash
+pip install holidays   # first time only
+python add_holidays.py
+```
+
+---
+
+## Step 8 — Drop Outlier Delays → dataset_with_weather.parquet
+
+**Script:** `drop_outlier_delays.py`  
+**Input:** `dataset_with_weather.parquet`  
+**Output:** `dataset_with_weather.parquet` (in-place, outlier rows removed)
+
+Drops rows where `arrival_delay_s > 1800` **or** `departure_delay_s > 1800` (30-minute threshold). These represent ~15.6% of the dataset and are likely corrupt records rather than real delays.
+
+Processes the file one PyArrow row group at a time — RAM usage stays bounded regardless of file size. Writes to `.tmp`, then atomically replaces the original.
+
+Run:
+```bash
+python drop_outlier_delays.py
+```
+
+---
+
+## Step 9 — Drop Implausibly Early Arrivals → dataset_with_weather.parquet
+
+**Script:** `drop_early_outliers.py`  
+**Input:** `dataset_with_weather.parquet`  
+**Output:** `dataset_with_weather.parquet` (in-place, early outlier rows removed)
+
+Drops rows where `arrival_delay_s < -120` **or** `departure_delay_s < -120` (2-minute early threshold). Swiss transit regulations prohibit early departures, so values beyond -120s are data artifacts rather than real early arrivals (~0.60% of rows). Dropping is preferred over capping to avoid creating an artificial spike at -120s in the delay distribution.
+
+Same row-group streaming approach as Step 8.
+
+Run:
+```bash
+python drop_early_outliers.py
+```
+
+---
+
+## Step 10 — Drop Missing Weather → dataset_with_weather.parquet
+
+**Script:** `drop_missing_weather.py`  
+**Input:** `dataset_with_weather.parquet`  
+**Output:** `dataset_with_weather.parquet` (in-place, incomplete rows removed)
+
+Drops rows where any of the 9 weather columns (`temperature`, `precipitation`, `sunshine`, `humidity`, `wind_speed`, `wind_gust`, `wind_dir`, `pressure`, `snow_depth`) is NULL. These arise from stops that could not be matched to a MeteoSwiss station or timestamps outside the weather data coverage (~0.47% of rows).
+
+Same row-group streaming approach as previous steps.
+
+Run:
+```bash
+python drop_missing_weather.py
+```
+
+---
+
 ## Full Run Order
 
 ```bash
@@ -251,7 +328,31 @@ python fetch_weather_hourly.py
 
 # 6: join everything (pass-through rows excluded automatically)
 python add_weather.py
+
+# 7: add canton-aware public holiday flag
+python add_holidays.py
+
+# 8: drop outlier delays (> 30 min)
+python drop_outlier_delays.py
+
+# 9: drop implausibly early arrivals/departures (< -2 min — ~0.60% of rows)
+python drop_early_outliers.py
+
+# 10: drop rows with any missing weather field (~0.47% of rows)
+python drop_missing_weather.py
 ```
+
+### Utility: create a line/stop sub-dataset
+
+To extract a filtered subset without touching the main file:
+
+```bash
+# Example: line 705, Echandens Chocolatière only
+python filter_705_echandens.py
+# → data/dataset_705_echandens.parquet (27,959 rows)
+```
+
+Uses DuckDB predicate pushdown — scans only relevant row groups.
 
 ### Utility: clean an existing dataset_with_weather.parquet
 

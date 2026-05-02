@@ -1,9 +1,8 @@
 from ml.data import DataLoader
 from ml.pipeline import MLPipeline
 from ml.preprocessors.scaler import FeatureScaler
-from ml.preprocessors.polynomial import PolynomialExpander
-from ml.models.ridge import RidgeModel
 from ml.models.lgbm import LightGBMModel
+from ml.models.xgboost_model import XGBoostModel
 from ml.evaluation import Evaluator
 from ml.experiment import Experiment
 
@@ -18,11 +17,9 @@ DROP_COLS = [
 ]
 
 NUMERIC_COLS = [
-    "temperature", "precipitation", "humidity",
+    "temperature", "precipitation", "sunshine", "humidity",
     "wind_speed", "wind_gust", "pressure", "snow_depth",
 ]
-
-WIND_CYCLICAL = ["wind_dir_sin", "wind_dir_cos"]
 
 # ── Experiments ────────────────────────────────────────────────────────────────
 
@@ -30,24 +27,46 @@ loader = DataLoader(path=DATASET, target=TARGET, drop_cols=DROP_COLS)
 evaluator = Evaluator()
 
 experiments = {
-    "Ridge": Experiment(
-        loader=loader,
-        pipeline=MLPipeline(
-            preprocessors=[
-                FeatureScaler(cols=NUMERIC_COLS),
-                PolynomialExpander(cols=NUMERIC_COLS + WIND_CYCLICAL, degree=2),
-            ],
-            model=RidgeModel(alpha=1.0),
-        ),
-        evaluator=evaluator,
-    ),
     "LightGBM": Experiment(
         loader=loader,
         pipeline=MLPipeline(
-            preprocessors=[
-                FeatureScaler(cols=NUMERIC_COLS),
-            ],
+            preprocessors=[FeatureScaler(cols=NUMERIC_COLS)],
             model=LightGBMModel(n_estimators=500, learning_rate=0.05, num_leaves=31),
+        ),
+        evaluator=evaluator,
+    ),
+    "LightGBM-tuned": Experiment(
+        loader=loader,
+        pipeline=MLPipeline(
+            preprocessors=[FeatureScaler(cols=NUMERIC_COLS)],
+            model=LightGBMModel(
+                n_estimators=3000,
+                learning_rate=0.01,
+                num_leaves=50,
+                min_child_samples=50,
+                max_bin=512,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                reg_alpha=0.1,
+                reg_lambda=0.1,
+                min_gain_to_split=0.01,
+                early_stopping_rounds=50,
+                log_every=100,
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "XGBoost": Experiment(
+        loader=loader,
+        pipeline=MLPipeline(
+            preprocessors=[FeatureScaler(cols=NUMERIC_COLS)],
+            model=XGBoostModel(
+                n_estimators=500,
+                learning_rate=0.05,
+                max_depth=6,
+                subsample=0.8,
+                colsample_bytree=0.8,
+            ),
         ),
         evaluator=evaluator,
     ),

@@ -12,7 +12,7 @@ class MLPipeline:
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "MLPipeline":
         for preprocessor in self.preprocessors:
-            X = preprocessor.fit_transform(X)
+            X = preprocessor.fit_transform(X, y)
         self.model.fit(X, y)
         return self
 

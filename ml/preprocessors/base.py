@@ -11,5 +11,5 @@ class BasePreprocessor(ABC):
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         ...
 
-    def fit_transform(self, X: pd.DataFrame) -> pd.DataFrame:
+    def fit_transform(self, X: pd.DataFrame, y: pd.Series = None) -> pd.DataFrame:
         return self.fit(X).transform(X)

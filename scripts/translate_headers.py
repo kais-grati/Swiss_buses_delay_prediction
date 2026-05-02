@@ -28,9 +28,12 @@ COLUMN_MAPPING = {
 }
 
 FOLDER = Path(__file__).resolve().parent.parent / "data" / "raw"
-i=0
 
-for filepath in glob.glob(os.path.join(FOLDER, "*.csv")):
+csv_files = sorted(glob.glob(os.path.join(FOLDER, "*.csv")))
+n = len(csv_files)
+print(f"Translating headers for {n} files...")
+
+for i, filepath in enumerate(csv_files, 1):
     with open(filepath, "r+", encoding="utf-8") as f:
         first_line = f.readline()
         rest = f.read()
@@ -42,6 +45,6 @@ for filepath in glob.glob(os.path.join(FOLDER, "*.csv")):
         f.seek(0)
         f.write(new_header + "\n" + rest)
         f.truncate()
-    i+=1
-    print(f"{i}/365")
-    print(f"Done: {os.path.basename(filepath)}")
+    print(f"  [{i}/{n}] {os.path.basename(filepath)}")
+
+print("Done.")

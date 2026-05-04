@@ -1,0 +1,68 @@
+Without TemporalFeatureExtractor
+
+  learning_rate: 0.011164245970961571
+  num_leaves: 116
+  min_child_samples: 43
+  min_sum_hessian_in_leaf: 0.9756353974751673
+  subsample: 0.9363929416897576
+  colsample_bytree: 0.9988094388849174
+  feature_fraction_bynode: 0.9450155202549205
+  reg_alpha: 0.27245190090589816
+  reg_lambda: 0.78391786930204
+  path_smooth: 4.405998450654837
+
+      "LightGBM-optuna": Experiment(
+        loader=loader_enhanced,
+        pipeline=MLPipeline(
+            preprocessors=[FeatureScaler(cols=NUMERIC_COLS), 
+                           TemporalFeatureExtractor()],
+            model=LightGBMModel(
+                n_estimators=3000,
+                early_stopping_rounds=50,
+                learning_rate=0.011164245970961571,
+                num_leaves=116,
+                min_child_samples=43,
+                min_sum_hessian_in_leaf=0.9756353974751673,
+                subsample=0.9363929416897576,
+                subsample_freq=1,
+                colsample_bytree=0.9988094388849174,
+                feature_fraction_bynode=0.9450155202549205,
+                reg_alpha=0.27245190090589816,
+                reg_lambda=0.78391786930204,
+                path_smooth=4.405998450654837,
+            ),
+        ),
+        evaluator=evaluator,
+    )
+
+LightGBM-optuna    6577.13     81.10s   0.3233
+
+with TemporalFeatureExtractor
+
+  learning_rate: 0.024864985683759746
+  num_leaves: 78
+  min_child_samples: 86
+  min_sum_hessian_in_leaf: 0.013837807248223857
+  subsample: 0.9940870655183781
+  colsample_bytree: 0.6580004324956996
+  feature_fraction_bynode: 0.9019956230179453
+  reg_alpha: 0.29733122973301546
+  reg_lambda: 0.006579169405573432
+  path_smooth: 5.094559948404132
+
+LightGBMModel | MSE: 6551.84 | RMSE: 80.94s | R²: 0.3259
+
+with TemporalFeatureExtractor & WeatherFeatureEngineer
+
+  learning_rate: 0.007126947042377407
+  num_leaves: 168
+  min_child_samples: 40
+  min_sum_hessian_in_leaf: 0.0899176805301358
+  subsample: 0.9998756827358574
+  colsample_bytree: 0.5757330744549699
+  feature_fraction_bynode: 0.9734799081519098
+  reg_alpha: 1.7021369826715338
+  reg_lambda: 7.970747211586931
+  path_smooth: 4.671171717084908
+
+LightGBM-optuna3    6564.12     81.02s   0.3246

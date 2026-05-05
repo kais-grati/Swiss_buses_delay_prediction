@@ -48,4 +48,5 @@ class ClassificationExperiment(Experiment):
             predictions,
             model_name=type(self.pipeline.model).__name__,
             is_classification=True,
+            class_names=self.encoder.class_names,
         )

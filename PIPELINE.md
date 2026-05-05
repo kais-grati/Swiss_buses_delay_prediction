@@ -375,3 +375,158 @@ Uses DuckDB streaming — the full file is never loaded into RAM. Writes to a
 | `weather_hourly.parquet` | ~50–80 MB | Hourly weather per station |
 | `station_data.parquet` | ~2.6 MB | Swiss bus stop coordinates |
 | `dataset_with_weather.parquet` | ~5–6 GB | Final training dataset |
+
+---
+
+# ML Pipeline
+
+This section describes the modular ML framework in `ml/` used to train and evaluate models on the prepared dataset.
+
+## Architecture
+
+```
+DataLoader  →  MLPipeline (preprocessors → model)  →  Evaluator
+                                                           ↑
+                                             Experiment / ClassificationExperiment
+```
+
+`Experiment` wires the three components together. `ClassificationExperiment` adds a target-encoding step via a `ClassEncoder` before fitting.
+
+## Directory Structure
+
+```
+ml/
+  data.py                         # DataLoader
+  pipeline.py                     # MLPipeline
+  experiment.py                   # Experiment, ClassificationExperiment
+  evaluation.py                   # Evaluator (regression + classification)
+  optimizer.py                    # LGBMOptimizer, XGBoostOptimizer, CatBoostOptimizer
+  preprocessors/
+    base.py                       # abstract BasePreprocessor
+    class_encoder.py              # abstract ClassEncoder (base for target binning)
+    delay_binner.py               # DelayBinner (continuous delay → 4 classes)
+    scaler.py                     # FeatureScaler (StandardScaler on selected cols)
+    temporal.py                   # TemporalFeatureExtractor (hour, dow from timestamp)
+    target_encoder.py             # HistoricalMeanEncoder (lag feature by group)
+    weather_engineer.py           # WeatherFeatureEngineer (wind chill, adverse flag)
+    weather_rush_hour.py          # WeatherRushHourPreprocessor
+    wind_encoder.py               # WindDirectionEncoder (wind_dir → sin/cos)
+    polynomial.py                 # PolynomialExpander
+    sinusoidal.py                 # SinusoidalEncoder
+  models/
+    base.py                       # abstract BaseModel
+    ridge.py                      # RidgeModel
+    lgbm.py                       # LightGBMModel (GBDT + DART, early stopping)
+    xgboost_model.py              # XGBoostModel (early stopping)
+    catboost_model.py             # CatBoostModel (early stopping)
+    stacking.py                   # StackingModel (k-fold meta-learner)
+    logistic_regression.py        # LogisticRegressionModel (multi-class)
+```
+
+---
+
+## Regression Pipeline
+
+Standard path: predict `arrival_delay_s` as a continuous value.
+
+```python
+experiment = Experiment(
+    loader=DataLoader(path=DATASET, target="arrival_delay_s", drop_cols=DROP_COLS),
+    pipeline=MLPipeline(
+        preprocessors=[
+            TemporalFeatureExtractor(),
+            FeatureScaler(cols=NUMERIC_COLS),
+        ],
+        model=LightGBMModel(n_estimators=3000, early_stopping_rounds=50),
+    ),
+    evaluator=Evaluator(),
+)
+results = experiment.run()
+# returns: {"mse": ..., "rmse": ..., "r2": ...}
+```
+
+**Evaluator metrics (regression):** MSE, RMSE (seconds), R²
+
+---
+
+## Classification Pipeline
+
+Converts the continuous delay target into discrete classes before training.
+
+### Target Encoding: `ClassEncoder` and `DelayBinner`
+
+`ClassEncoder` is the abstract base class. `DelayBinner` is the concrete implementation that bins `arrival_delay_s` into 4 classes using configurable thresholds:
+
+| Class | Range | Meaning |
+|-------|-------|---------|
+| 0 | delay ≤ 60s | On-time (includes early arrivals) |
+| 1 | 60s < delay ≤ 180s | Slight delay (within SBB 3-min tolerance) |
+| 2 | 180s < delay ≤ 600s | Moderate delay (likely missed connections) |
+| 3 | delay > 600s | Severe delay |
+
+The bin thresholds are configurable. `class_names` is auto-generated from `self.bins` and flows through to the evaluator for labeled output.
+
+```python
+binner = DelayBinner()                   # default bins: [60, 180, 600]
+binner = DelayBinner(bins=[60, 300])     # custom 3-class variant
+print(binner.class_names)
+# → ['≤60s', '60–180s', '180–600s', '>600s']
+```
+
+### `ClassificationExperiment`
+
+Extends `Experiment` with a target-encoding step. Encodes both `y_train` and `y_test` before fitting, then passes `class_names` to the evaluator automatically.
+
+```python
+experiment = ClassificationExperiment(
+    loader=DataLoader(path=DATASET, target="arrival_delay_s", drop_cols=DROP_COLS_KEEP_TS),
+    pipeline=MLPipeline(
+        preprocessors=[
+            TemporalFeatureExtractor(),
+            FeatureScaler(cols=NUMERIC_COLS),
+        ],
+        model=LogisticRegressionModel(class_weight="balanced"),
+    ),
+    evaluator=Evaluator(),
+    encoder=DelayBinner(),
+)
+results = experiment.run()
+# returns: {"f1": ..., "report": ..., "cm": ...}
+```
+
+**Evaluator output (classification):**
+- Macro-F1 summary panel
+- Per-class precision / recall / F1 / support table
+- Labeled confusion matrix (rows = actual class, columns = predicted class, using `class_names`)
+
+### Adding a new encoder
+
+Subclass `ClassEncoder` and implement `encode`, `decode`, and optionally `class_names`:
+
+```python
+class QuartileEncoder(ClassEncoder):
+    def encode(self, y): ...
+    def decode(self, y_encoded): ...
+
+    @property
+    def class_names(self):
+        return ["Q1", "Q2", "Q3", "Q4"]
+```
+
+No other changes needed — `ClassificationExperiment` and `Evaluator` pick up `class_names` automatically.
+
+---
+
+## Hyperparameter Optimization
+
+`ml/optimizer.py` provides Optuna-based Bayesian optimizers for LightGBM, XGBoost, and CatBoost.
+
+```python
+from ml.optimizer import LGBMOptimizer
+
+optimizer = LGBMOptimizer(loader=loader_enhanced, numeric_cols=NUMERIC_COLS, n_trials=100)
+study = optimizer.optimize()
+# prints best params and validation RMSE after each trial
+```
+
+Optimizers cache the loaded dataset on first call (`_load_once`) and use TPE sampling. Best parameters are printed at the end and can be copy-pasted directly into an `Experiment` definition in `main.py`.

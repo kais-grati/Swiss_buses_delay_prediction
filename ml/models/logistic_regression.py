@@ -7,14 +7,12 @@ class LogisticRegressionModel(BaseModel):
     def __init__(
         self,
         C: float = 1.0,
-        penalty: str = "l2",
         solver: str = "lbfgs",
         max_iter: int = 1000,
         class_weight: str | None = "balanced",
     ):
         self._model = LogisticRegression(
             C=C,
-            penalty=penalty,
             solver=solver,
             max_iter=max_iter,
             class_weight=class_weight,

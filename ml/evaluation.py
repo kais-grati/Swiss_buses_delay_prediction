@@ -10,7 +10,8 @@ console = Console()
                                                                                                                                                     
 class Evaluator:                                                                                                                                     
     def evaluate(
-        self, y_true: np.ndarray, y_pred: np.ndarray, model_name: str = "", is_classification: bool = False                                          
+        self, y_true: np.ndarray, y_pred: np.ndarray, model_name: str = "",
+        is_classification: bool = False, class_names: list[str] | None = None,
     ) -> Dict[str, Union[float, str]]:                                                                                                               
         if is_classification:                                                                                                                        
             f1 = f1_score(y_true, y_pred, average="macro")                                                                                           
@@ -53,10 +54,14 @@ class Evaluator:
                                                                                                                                                     
             console.print(metrics_table)                                                                                                             
                                                                                                                                                     
-            # 3. Confusion Matrix Table                                                                                                              
-            cm_table = Table(title="Confusion Matrix (Actual vs Predicted)", show_header=False, show_edge=True, box=None)
-            for row in cm:                                                                                                                           
-                cm_table.add_row(*[f"[bold white]{val}[/bold white]" for val in row])                                                                
+            # 3. Confusion Matrix Table
+            labels = class_names or [str(i) for i in range(len(cm))]
+            cm_table = Table(title="Confusion Matrix (Actual ↓ | Predicted →)", show_header=True, header_style="bold yellow")
+            cm_table.add_column("", style="bold yellow")
+            for label in labels:
+                cm_table.add_column(label, justify="right")
+            for i, row in enumerate(cm):
+                cm_table.add_row(labels[i], *[f"[bold white]{val}[/bold white]" for val in row])                                                                
                                                                                                                                                     
             console.print(cm_table)                                                                                                                  
             console.print("\n")                                                                                                                      

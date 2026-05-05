@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Optional
 import pandas as pd
 import numpy as np
 
@@ -13,5 +14,10 @@ class ClassEncoder(ABC):
 
     @abstractmethod
     def decode(self, y_encoded: np.ndarray) -> np.ndarray:
-        """Optional: Convert classes back to approximate continuous values."""
+        """Convert classes back to approximate continuous values."""
         ...
+
+    @property
+    def class_names(self) -> Optional[list[str]]:
+        """Human-readable label for each class. Override in subclasses."""
+        return None

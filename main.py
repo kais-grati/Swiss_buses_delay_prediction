@@ -1,6 +1,7 @@
 from ml.data import DataLoader
 from ml.pipeline import MLPipeline
 from ml.preprocessors.scaler import FeatureScaler
+from ml.preprocessors.polynomial import PolynomialExpander, PolynomialFeatures
 from ml.preprocessors.temporal import TemporalFeatureExtractor
 from ml.preprocessors.target_encoder import HistoricalMeanEncoder
 from ml.preprocessors.weather_engineer import WeatherFeatureEngineer
@@ -15,10 +16,6 @@ from ml.models.catboost_model import CatBoostModel
 from ml.models.ridge import RidgeModel
 from ml.models.stacking import StackingModel
 from ml.models.logistic_regression import LogisticRegressionModel
-
-from ml.models.logistic_regression import LogisticRegressionModel                                                                                    
-from ml.experiment import Experiment, ClassificationExperiment                                                                                       
-from ml.preprocessors.delay_binner import DelayBinner
 
 from rich.console import Console
 from rich.table import Table                                                                                                                         
@@ -371,7 +368,7 @@ console.print("\n", reg_table)
                 
 console.print("\n", Panel("[bold green]CLASSIFICATION EXPERIMENTS[/bold green]", expand=False))                                                      
                 
-binner = DelayBinner(bins=[120, 600])                                                                                                                
+binner = DelayBinner()                                                                                                                
                 
 class_experiments = {                                                                                                                                
     "LogReg-Balanced": ClassificationExperiment(

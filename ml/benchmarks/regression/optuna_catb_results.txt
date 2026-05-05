@@ -1,0 +1,8 @@
+  learning_rate: 0.05543418338273171
+  depth: 5
+  l2_leaf_reg: 0.540507962054327
+  random_strength: 0.16061584861239986
+  bagging_temperature: 0.49356279590945856
+  min_data_in_leaf: 62
+
+CatBoostModel | MSE: 6644.90 | RMSE: 81.52s | R²: 0.3163

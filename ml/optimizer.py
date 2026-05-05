@@ -3,6 +3,7 @@ import optuna
 from ml.data import DataLoader
 from ml.models.lgbm import LightGBMModel
 from ml.models.xgboost_model import XGBoostModel
+from ml.models.catboost_model import CatBoostModel
 from ml.pipeline import MLPipeline
 from ml.preprocessors.scaler import FeatureScaler
 from ml.preprocessors.temporal import TemporalFeatureExtractor
@@ -127,6 +128,69 @@ class XGBoostOptimizer:
         )
         pipeline.fit(X_train, y_train)
         return model._model.best_score
+
+    def optimize(self) -> optuna.Study:
+        sampler = optuna.samplers.TPESampler(seed=self.seed)
+        study = optuna.create_study(direction="minimize", sampler=sampler)
+        study.optimize(
+            self._objective,
+            n_trials=self.n_trials,
+            show_progress_bar=True,
+        )
+
+        print(f"\nBest RMSE: {study.best_value:.4f}s")
+        print("Best params:")
+        for k, v in study.best_params.items():
+            print(f"  {k}: {v}")
+
+        return study
+
+
+class CatBoostOptimizer:
+    def __init__(
+        self,
+        loader: DataLoader,
+        numeric_cols: List[str],
+        n_trials: int = 100,
+        n_estimators: int = 2000,
+        early_stopping_rounds: int = 50,
+        val_fraction: float = 0.1,
+        seed: Optional[int] = 42,
+    ):
+        self.loader = loader
+        self.numeric_cols = numeric_cols
+        self.n_trials = n_trials
+        self.n_estimators = n_estimators
+        self.early_stopping_rounds = early_stopping_rounds
+        self.val_fraction = val_fraction
+        self.seed = seed
+        self._data = None
+
+    def _load_once(self):
+        if self._data is None:
+            self._data = self.loader.load()
+        return self._data
+
+    def _objective(self, trial: optuna.Trial) -> float:
+        X_train, _, y_train, _ = self._load_once()
+
+        model = CatBoostModel(
+            n_estimators=self.n_estimators,
+            early_stopping_rounds=self.early_stopping_rounds,
+            val_fraction=self.val_fraction,
+            learning_rate=trial.suggest_float("learning_rate", 0.005, 0.1, log=True),
+            depth=trial.suggest_int("depth", 4, 12),
+            l2_leaf_reg=trial.suggest_float("l2_leaf_reg", 1e-2, 10.0, log=True),
+            random_strength=trial.suggest_float("random_strength", 1e-2, 10.0, log=True),
+            bagging_temperature=trial.suggest_float("bagging_temperature", 0.0, 1.0),
+            min_data_in_leaf=trial.suggest_int("min_data_in_leaf", 1, 100),
+        )
+        pipeline = MLPipeline(
+            preprocessors=[FeatureScaler(cols=self.numeric_cols), TemporalFeatureExtractor()],
+            model=model,
+        )
+        pipeline.fit(X_train, y_train)
+        return model._model.get_best_score()["validation"]["RMSE"]
 
     def optimize(self) -> optuna.Study:
         sampler = optuna.samplers.TPESampler(seed=self.seed)

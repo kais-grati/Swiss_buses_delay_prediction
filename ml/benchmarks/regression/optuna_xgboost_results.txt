@@ -1,0 +1,10 @@
+# XGBoost Optuna Hyperparameters
+learning_rate: 0.03809720744535876
+max_depth: 9
+min_child_weight: 90.28669329772264
+gamma: 0.016744637853508566
+subsample: 0.9335838518925651
+colsample_bytree: 0.9389806288470189
+colsample_bylevel: 0.8337241352904957
+reg_alpha: 0.00035666207579412883
+reg_lambda: 1.8707902692338567

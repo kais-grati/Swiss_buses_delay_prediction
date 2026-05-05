@@ -1,13 +1,18 @@
 from typing import List, Optional
 import optuna
+from sklearn.metrics import f1_score
+from sklearn.model_selection import train_test_split
 from ml.data import DataLoader
 from ml.models.lgbm import LightGBMModel
+from ml.models.lgbm_classifier import LightGBMClassifierModel
 from ml.models.xgboost_model import XGBoostModel
 from ml.models.catboost_model import CatBoostModel
 from ml.pipeline import MLPipeline
 from ml.preprocessors.scaler import FeatureScaler
 from ml.preprocessors.temporal import TemporalFeatureExtractor
 from ml.preprocessors.weather_engineer import WeatherFeatureEngineer
+from ml.preprocessors.target_encoder import HistoricalMeanEncoder
+from ml.preprocessors.delay_binner import DelayBinner
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -73,6 +78,102 @@ class LGBMOptimizer:
         )
 
         print(f"\nBest RMSE: {study.best_value:.4f}s")
+        print("Best params:")
+        for k, v in study.best_params.items():
+            print(f"  {k}: {v}")
+
+        return study
+
+
+class LGBMClassifierOptimizer:
+    """Bayesian hyperparameter search for LightGBMClassifier, maximising macro-F1.
+
+    Uses a manual inner train/val split (stratified) so the binner can be
+    applied to both splits without touching the held-out test set.
+    """
+
+    def __init__(
+        self,
+        loader: DataLoader,
+        binner: DelayBinner | None = None,
+        n_trials: int = 100,
+        n_estimators: int = 2000,
+        early_stopping_rounds: int = 50,
+        val_fraction: float = 0.15,
+        seed: Optional[int] = 42,
+    ):
+        self.loader = loader
+        self.binner = binner or DelayBinner()
+        self.n_trials = n_trials
+        self.n_estimators = n_estimators
+        self.early_stopping_rounds = early_stopping_rounds
+        self.val_fraction = val_fraction
+        self.seed = seed
+        self._data = None
+
+    def _load_once(self):
+        if self._data is None:
+            self._data = self.loader.load()
+        return self._data
+
+    def _build_preprocessors(self):
+        return [
+            TemporalFeatureExtractor(),
+            WeatherFeatureEngineer(),
+            HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
+        ]
+
+    def _objective(self, trial: optuna.Trial) -> float:
+        X_train_full, _, y_train_full, _ = self._load_once()
+
+        # Inner split (stratified on encoded labels to preserve class ratios)
+        y_enc_full = self.binner.encode(y_train_full)
+        X_tr, X_val, y_tr_raw, y_val_raw = train_test_split(
+            X_train_full, y_train_full,
+            test_size=self.val_fraction, random_state=trial.number, stratify=y_enc_full,
+        )
+        y_tr = self.binner.encode(y_tr_raw)
+        y_val = self.binner.encode(y_val_raw)
+
+        # Build and fit pipeline on inner train split
+        preprocessors = self._build_preprocessors()
+        X_tr_proc = X_tr.copy()
+        for p in preprocessors:
+            X_tr_proc = p.fit_transform(X_tr_proc, y_tr_raw)
+        X_val_proc = X_val.copy()
+        for p in preprocessors:
+            X_val_proc = p.transform(X_val_proc)
+
+        model = LightGBMClassifierModel(
+            n_estimators=self.n_estimators,
+            early_stopping_rounds=self.early_stopping_rounds,
+            val_fraction=self.val_fraction,
+            class_weight="balanced",
+            learning_rate=trial.suggest_float("learning_rate", 0.005, 0.1, log=True),
+            num_leaves=trial.suggest_int("num_leaves", 15, 200),
+            min_child_samples=trial.suggest_int("min_child_samples", 1, 100),
+            min_sum_hessian_in_leaf=trial.suggest_float("min_sum_hessian_in_leaf", 1e-5, 1.0, log=True),
+            subsample=trial.suggest_float("subsample", 0.4, 1.0),
+            subsample_freq=1,
+            colsample_bytree=trial.suggest_float("colsample_bytree", 0.4, 1.0),
+            feature_fraction_bynode=trial.suggest_float("feature_fraction_bynode", 0.4, 1.0),
+            reg_alpha=trial.suggest_float("reg_alpha", 1e-4, 10.0, log=True),
+            reg_lambda=trial.suggest_float("reg_lambda", 1e-4, 10.0, log=True),
+        )
+        model.fit(X_tr_proc, y_tr)
+        preds = model.predict(X_val_proc)
+        return f1_score(y_val, preds, average="macro")
+
+    def optimize(self) -> optuna.Study:
+        sampler = optuna.samplers.TPESampler(seed=self.seed)
+        study = optuna.create_study(direction="maximize", sampler=sampler)
+        study.optimize(
+            self._objective,
+            n_trials=self.n_trials,
+            show_progress_bar=True,
+        )
+
+        print(f"\nBest macro-F1: {study.best_value:.4f}")
         print("Best params:")
         for k, v in study.best_params.items():
             print(f"  {k}: {v}")

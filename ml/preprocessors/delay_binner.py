@@ -12,19 +12,19 @@ class DelayBinner(ClassEncoder):
     2: Moderate Delay(180s < delay <= 600s, likely missed connections)
     3: Severe Delay  (delay > 600s)
     """
-    def __init__(self, bins=[60, 180, 600]):
+    def __init__(self, bins=[15, 45, 90, 180]):
         self.bins = bins
 
     def encode(self, y: pd.Series) -> pd.Series:
         return pd.cut(
             y,
             bins=[-float('inf')] + self.bins + [float('inf')],
-            labels=[0, 1, 2, 3]
+            labels=[0, 1, 2, 3, 4]
         ).astype(int)
 
     def decode(self, y_encoded: np.ndarray) -> np.ndarray:
         # Returns the midpoint of each bin as a representative value
-        midpoints = [0, 120, 390, 900]
+        midpoints = [7, 30, 67, 135, 270]
         return np.array([midpoints[i] for i in y_encoded])
 
     @property

@@ -1,10 +1,10 @@
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from ml.models.base import BaseModel
+from ml.models.base import ClassifierModel
 
 
-class LogisticRegressionModel(BaseModel):
+class LogisticRegressionModel(ClassifierModel):
     def __init__(
         self,
         C: float = 1.0,
@@ -29,3 +29,6 @@ class LogisticRegressionModel(BaseModel):
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         return self._model.predict(X)
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        return self._model.predict_proba(X)

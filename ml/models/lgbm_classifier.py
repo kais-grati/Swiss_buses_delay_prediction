@@ -2,10 +2,10 @@ import numpy as np
 import pandas as pd
 import lightgbm as lgb
 from sklearn.model_selection import train_test_split
-from ml.models.base import BaseModel
+from ml.models.base import ClassifierModel
 
 
-class LightGBMClassifierModel(BaseModel):
+class LightGBMClassifierModel(ClassifierModel):
     def __init__(
         self,
         n_estimators: int = 500,
@@ -73,3 +73,6 @@ class LightGBMClassifierModel(BaseModel):
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         return self._model.predict(X)
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        return self._model.predict_proba(X)

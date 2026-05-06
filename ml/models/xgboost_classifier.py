@@ -3,10 +3,10 @@ import pandas as pd
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_sample_weight
-from ml.models.base import BaseModel
+from ml.models.base import ClassifierModel
 
 
-class XGBoostClassifierModel(BaseModel):
+class XGBoostClassifierModel(ClassifierModel):
     def __init__(
         self,
         n_estimators: int = 500,
@@ -72,3 +72,6 @@ class XGBoostClassifierModel(BaseModel):
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         return self._model.predict(X)
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        return self._model.predict_proba(X)

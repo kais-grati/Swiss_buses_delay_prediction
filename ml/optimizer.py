@@ -71,11 +71,14 @@ class LGBMOptimizer:
     def optimize(self) -> optuna.Study:
         sampler = optuna.samplers.TPESampler(seed=self.seed)
         study = optuna.create_study(direction="minimize", sampler=sampler)
-        study.optimize(
-            self._objective,
-            n_trials=self.n_trials,
-            show_progress_bar=True,
-        )
+        try:
+            study.optimize(
+                self._objective,
+                n_trials=self.n_trials,
+                show_progress_bar=True,
+            )
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user. Printing best results found so far...")
 
         print(f"\nBest RMSE: {study.best_value:.4f}s")
         print("Best params:")
@@ -119,8 +122,8 @@ class LGBMClassifierOptimizer:
     def _build_preprocessors(self):
         return [
             TemporalFeatureExtractor(),
-            WeatherFeatureEngineer(),
-            HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
+            # WeatherFeatureEngineer(),
+            # HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
         ]
 
     def _objective(self, trial: optuna.Trial) -> float:
@@ -233,11 +236,14 @@ class XGBoostOptimizer:
     def optimize(self) -> optuna.Study:
         sampler = optuna.samplers.TPESampler(seed=self.seed)
         study = optuna.create_study(direction="minimize", sampler=sampler)
-        study.optimize(
-            self._objective,
-            n_trials=self.n_trials,
-            show_progress_bar=True,
-        )
+        try:
+            study.optimize(
+                self._objective,
+                n_trials=self.n_trials,
+                show_progress_bar=True,
+            )
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user. Printing best results found so far...")
 
         print(f"\nBest RMSE: {study.best_value:.4f}s")
         print("Best params:")
@@ -296,11 +302,14 @@ class CatBoostOptimizer:
     def optimize(self) -> optuna.Study:
         sampler = optuna.samplers.TPESampler(seed=self.seed)
         study = optuna.create_study(direction="minimize", sampler=sampler)
-        study.optimize(
-            self._objective,
-            n_trials=self.n_trials,
-            show_progress_bar=True,
-        )
+        try:
+            study.optimize(
+                self._objective,
+                n_trials=self.n_trials,
+                show_progress_bar=True,
+            )
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user. Printing best results found so far...")
 
         print(f"\nBest RMSE: {study.best_value:.4f}s")
         print("Best params:")

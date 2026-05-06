@@ -401,6 +401,7 @@ ml/
   experiment.py                   # Experiment, ClassificationExperiment
   evaluation.py                   # Evaluator (regression + classification)
   optimizer.py                    # LGBMOptimizer, XGBoostOptimizer, CatBoostOptimizer
+  logger.py                       # ExperimentLogger (appends results to results/experiment_log.jsonl)
   preprocessors/
     base.py                       # abstract BasePreprocessor
     class_encoder.py              # abstract ClassEncoder (base for target binning)
@@ -411,16 +412,24 @@ ml/
     weather_engineer.py           # WeatherFeatureEngineer (wind chill, adverse flag)
     weather_rush_hour.py          # WeatherRushHourPreprocessor
     wind_encoder.py               # WindDirectionEncoder (wind_dir → sin/cos)
-    polynomial.py                 # PolynomialExpander
-    sinusoidal.py                 # SinusoidalEncoder
+    polynomial.py                 # PolynomialExpander (degree-n polynomial + interaction terms)
+    sinusoidal.py                 # SinusoidalExpander (sin/cos harmonics per feature)
+    poly_trig.py                  # PolyTrigExpander (polynomial + trig combined)
+    pca.py                        # PCAReducer (n_components or variance_threshold)
+    nystroem.py                   # NystroemExpander (RBF kernel approximation via Nyström)
   models/
-    base.py                       # abstract BaseModel
+    base.py                       # BaseModel (fit/predict), ClassifierModel (+ predict_proba)
     ridge.py                      # RidgeModel
     lgbm.py                       # LightGBMModel (GBDT + DART, early stopping)
     xgboost_model.py              # XGBoostModel (early stopping)
     catboost_model.py             # CatBoostModel (early stopping)
-    stacking.py                   # StackingModel (k-fold meta-learner)
+    stacking.py                   # StackingModel (k-fold OOF meta-learner, regression)
     logistic_regression.py        # LogisticRegressionModel (multi-class)
+    lgbm_classifier.py            # LightGBMClassifierModel
+    xgboost_classifier.py         # XGBoostClassifierModel
+    catboost_classifier.py        # CatBoostClassifierModel
+    classification_stacking.py    # ClassificationStackingModel (probability OOF stacking)
+    pipelined_classifier.py       # PipelinedClassifierModel (preprocessors + classifier as one unit)
 ```
 
 ---
@@ -499,6 +508,50 @@ results = experiment.run()
 - Per-class precision / recall / F1 / support table
 - Labeled confusion matrix (rows = actual class, columns = predicted class, using `class_names`)
 
+### Stacking Ensemble: `ClassificationStackingModel`
+
+`ClassificationStackingModel` trains multiple base classifiers using out-of-fold (OOF) cross-validation, then fits a meta-classifier on the resulting probability outputs. It inherits from `ClassifierModel` and is a drop-in replacement for any single classifier in a `ClassificationExperiment`.
+
+**Training flow:**
+1. Stratified 5-fold CV — for each fold × base model, `predict_proba()` fills an OOF matrix of shape `(n_train, n_base_models × n_classes)`
+2. Each base model is refit on the full training set
+3. The meta-model (LogisticRegression) is fit on the OOF matrix
+
+**Inference:** base models call `predict_proba()` in parallel → horizontal stack → meta-model `predict()`
+
+```python
+model = ClassificationStackingModel(
+    base_models=[
+        LightGBMClassifierModel(...),
+        XGBoostClassifierModel(...),
+        CatBoostClassifierModel(...),
+    ],
+    meta_model=LogisticRegressionModel(C=1.0),
+    n_folds=5,
+)
+```
+
+The model also exposes `predict_proba()`, making it composable (e.g. as a base model in a deeper stack).
+
+---
+
+### `PipelinedClassifierModel`
+
+A `ClassifierModel` that bundles its own preprocessor chain alongside a wrapped classifier. Useful when one base model in a stacking ensemble needs different feature transformations than the others — the internal preprocessors run privately during `fit`, `predict`, and `predict_proba`, leaving the shared pipeline unchanged.
+
+```python
+PipelinedClassifierModel(
+    preprocessors=[NystroemExpander(n_components=100, kernel="rbf")],
+    classifier=LogisticRegressionModel(C=1.0, max_iter=5000),
+)
+```
+
+The pipeline's shared preprocessors run first (e.g. `FeatureScaler`), then `PipelinedClassifierModel` applies its own chain on top before passing the result to the inner classifier. This avoids re-applying transformations that are already done by the outer pipeline.
+
+Since it inherits from `ClassifierModel`, it is a valid base model for `ClassificationStackingModel` and exposes both `predict()` and `predict_proba()`.
+
+---
+
 ### Adding a new encoder
 
 Subclass `ClassEncoder` and implement `encode`, `decode`, and optionally `class_names`:
@@ -514,6 +567,87 @@ class QuartileEncoder(ClassEncoder):
 ```
 
 No other changes needed — `ClassificationExperiment` and `Evaluator` pick up `class_names` automatically.
+
+---
+
+## Feature Expansion Preprocessors
+
+These preprocessors transform the feature matrix before it reaches the model. All follow the `BasePreprocessor` interface (`fit` / `transform` / `fit_transform`).
+
+### `PolynomialExpander`
+
+Replaces selected columns with their degree-n polynomial expansion using sklearn's `PolynomialFeatures` (`include_bias=False`). The output includes all degree-1 through degree-n terms (originals, interactions, powers).
+
+```python
+PolynomialExpander(cols=NUMERIC_COLS_LOGREG, degree=2)
+# 11 inputs → 77 output columns (degree-1 + degree-2 terms)
+```
+
+### `SinusoidalExpander`
+
+Replaces selected columns with `sin(k·x)` and `cos(k·x)` harmonics for `k = 1..n_components`. Useful for periodic signals like time-of-day or cyclical weather patterns.
+
+```python
+SinusoidalExpander(cols=["hour", "dow"], n_components=3)
+```
+
+### `PolyTrigExpander`
+
+Combines polynomial and trigonometric expansions in a single step. Produces degree-n polynomial terms plus `sin(k·x)` / `cos(k·x)` harmonics for each selected column. Non-selected columns pass through unchanged.
+
+```python
+PolyTrigExpander(cols=NUMERIC_COLS_LOGREG, degree=2, n_trig=1)
+# 11 inputs → 77 poly terms + 22 trig terms = 99 output columns
+# n_trig > 1 adds _1, _2, ... suffix to trig column names
+```
+
+Best used after `FeatureScaler` so polynomial and trig terms stay bounded.
+
+### `PCAReducer`
+
+Wraps sklearn's `PCA`. Replaces the entire feature matrix with `pc1, pc2, ...` principal components. Accepts either a fixed component count or a variance threshold.
+
+```python
+PCAReducer(n_components=20)           # keep exactly 20 components
+PCAReducer(variance_threshold=0.95)   # keep however many explain 95% variance
+```
+
+Useful after high-dimensional expansions (`PolynomialExpander`, `PolyTrigExpander`) to decorrelate features before a linear model.
+
+### `NystroemExpander`
+
+Approximates an RBF (or other) kernel via Nyström sampling, projecting the feature matrix into a `n_components`-dimensional kernel feature space. Fitting a linear model (LogisticRegression) on top is equivalent to a nonlinear classifier in the original space — with fundamentally different decision boundaries than tree-based models, making it a strong diversity contributor in stacking ensembles.
+
+```python
+NystroemExpander(n_components=100, kernel="rbf", gamma=None)
+# gamma=None → sklearn default: 1/n_features
+# actual n_components capped to n_train_samples if smaller
+```
+
+Always apply `FeatureScaler` before `NystroemExpander` — RBF distance is sensitive to feature scale.
+
+---
+
+## Experiment Logger
+
+`ExperimentLogger` appends one JSON line per experiment run to `results/experiment_log.jsonl`. The `results/` directory is created automatically on first use.
+
+```python
+logger = ExperimentLogger()                          # default path
+logger = ExperimentLogger("custom/path/log.jsonl")  # custom path
+logger.log(name, results, kind="regression")
+logger.log(name, results, kind="classification")
+```
+
+Each entry includes `timestamp`, `name`, `kind`, and the relevant metrics:
+- **Regression:** `mse`, `rmse`, `r2`
+- **Classification:** `macro_f1`, `f1_class_0`, `f1_class_1`, ... (per-class F1, skipping averages)
+
+Load all runs for comparison:
+```python
+import pandas as pd
+df = pd.read_json("results/experiment_log.jsonl", lines=True)
+```
 
 ---
 

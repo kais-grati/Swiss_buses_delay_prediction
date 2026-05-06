@@ -11,3 +11,9 @@ class BaseModel(ABC):
     @abstractmethod
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         ...
+
+
+class ClassifierModel(BaseModel):
+    @abstractmethod
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        ...

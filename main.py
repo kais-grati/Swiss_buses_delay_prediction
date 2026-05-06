@@ -11,11 +11,18 @@ from ml.models.xgboost_classifier import XGBoostClassifierModel
 from ml.models.catboost_model import CatBoostModel
 from ml.models.ridge import RidgeModel
 from ml.models.stacking import StackingModel
+from ml.models.classification_stacking import ClassificationStackingModel
+from ml.models.pipelined_classifier import PipelinedClassifierModel
 from ml.models.logistic_regression import LogisticRegressionModel
 from ml.models.catboost_classifier import CatBoostClassifierModel
 from ml.evaluation import Evaluator
 from ml.experiment import Experiment, ClassificationExperiment
 from ml.preprocessors.delay_binner import DelayBinner
+from ml.preprocessors.polynomial import PolynomialExpander
+from ml.preprocessors.pca import PCAReducer
+from ml.preprocessors.poly_trig import PolyTrigExpander
+from ml.preprocessors.nystroem import NystroemExpander
+from ml.logger import ExperimentLogger
 
 from rich.console import Console
 from rich.table import Table                                                                                                                         
@@ -26,7 +33,7 @@ console = Console()
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-DATASET = "data/dataset_705_echandens.parquet"
+DATASET = "data/dataset_705.parquet"
 TARGET  = "arrival_delay_s"
 
 DROP_COLS = [
@@ -409,10 +416,13 @@ experiments = {
 
 # ── Run Regression ────────────────────────────────────────────────────────────────      
                                                            
+logger = ExperimentLogger()
+
 results_reg = {}                                                                                                                                     
 for name, exp in experiments.items():                                                                                                                
     console.print(Panel(f"[bold blue]Running Regression: {name}[/bold blue]"))                                                                       
-    results_reg[name] = exp.run()                                                                                                                    
+    results_reg[name] = exp.run()
+    logger.log(name, results_reg[name], kind="regression")                                                                                                                    
                                                                                                                                                     
 # ── Summary Regression ──────────────────────────────────────────────────────────────                                                               
 reg_table = Table(title="Regression Performance Summary", show_header=True, header_style="bold magenta")                                             
@@ -448,32 +458,29 @@ class_experiments = {
     #     evaluator=evaluator,
     #     encoder=binner,
     # ),
-    # ── LGBM: best so far (0.4275) ───────────────────────────────────────────────
-    "LGBM-v1": ClassificationExperiment(
-        loader=loader_enhanced,
-        pipeline=MLPipeline(
-            preprocessors=[
-                TemporalFeatureExtractor(),
-                WeatherFeatureEngineer(),
-                HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
-            ],
-            model=LightGBMClassifierModel(
-                n_estimators=1000,
-                learning_rate=0.05,
-                num_leaves=63,
-                min_child_samples=10,
-                subsample=0.8,
-                subsample_freq=1,
-                colsample_bytree=0.8,
-                reg_alpha=0.1,
-                reg_lambda=0.1,
-                early_stopping_rounds=50,
-                class_weight="balanced",
-            ),
-        ),
-        evaluator=evaluator,
-        encoder=binner,
-    ),
+    # ── LGBM ───────────────────────────────────────────────
+    # "LGBM-v1-1k-rebalanced_classes": ClassificationExperiment(
+    #     loader=loader,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #         ],
+    #         model=LightGBMClassifierModel(
+    #             n_estimators=1000,
+    #             learning_rate=0.05,
+    #             num_leaves=63,
+    #             min_child_samples=10,
+    #             subsample=0.8,
+    #             subsample_freq=1,
+    #             colsample_bytree=0.8,
+    #             reg_alpha=0.1,
+    #             reg_lambda=0.1,
+    #             early_stopping_rounds=50,
+    #             class_weight="balanced",
+    #         ),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
     # ── LGBM: lower min_child_samples to help minority class 3 ──────────────────
     # "LGBM-v2-LowChild": ClassificationExperiment(
     #     loader=loader_enhanced,
@@ -536,8 +543,7 @@ class_experiments = {
     #     pipeline=MLPipeline(
     #         preprocessors=[
     #             TemporalFeatureExtractor(),
-    #             WeatherFeatureEngineer(),
-    #             HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
+    #             FeatureScaler(NUMERIC_COLS)
     #         ],
     #         model=XGBoostClassifierModel(
     #             n_estimators=1000,
@@ -590,8 +596,7 @@ class_experiments = {
     #     pipeline=MLPipeline(
     #         preprocessors=[
     #             TemporalFeatureExtractor(),
-    #             WeatherFeatureEngineer(),
-    #             HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
+    #             FeatureScaler(NUMERIC_COLS)
     #         ],
     #         model=CatBoostClassifierModel(
     #             n_estimators=1000,
@@ -606,12 +611,229 @@ class_experiments = {
     #     evaluator=evaluator,
     #     encoder=binner,
     # ),
+    # ── Stacking: LGBM + XGBoost + CatBoost + LogReg → LogisticRegression meta-learner ──
+    # "Stacking-LGBM-XGB-CatBoost-LogReg": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
+    #         ],
+    #         model=ClassificationStackingModel(
+    #             base_models=[
+    #                 LightGBMClassifierModel(
+    #                     n_estimators=1000,
+    #                     learning_rate=0.05,
+    #                     num_leaves=63,
+    #                     min_child_samples=10,
+    #                     subsample=0.8,
+    #                     subsample_freq=1,
+    #                     colsample_bytree=0.8,
+    #                     reg_alpha=0.1,
+    #                     reg_lambda=0.1,
+    #                     early_stopping_rounds=50,
+    #                     class_weight="balanced",
+    #                 ),
+    #                 XGBoostClassifierModel(
+    #                     n_estimators=1000,
+    #                     learning_rate=0.05,
+    #                     max_depth=6,
+    #                     min_child_weight=5.0,
+    #                     subsample=0.8,
+    #                     colsample_bytree=0.8,
+    #                     reg_alpha=0.1,
+    #                     reg_lambda=1.0,
+    #                     early_stopping_rounds=50,
+    #                     class_weight="balanced",
+    #                 ),
+    #                 CatBoostClassifierModel(
+    #                     n_estimators=1000,
+    #                     learning_rate=0.05,
+    #                     depth=6,
+    #                     l2_leaf_reg=3.0,
+    #                     min_data_in_leaf=5,
+    #                     early_stopping_rounds=50,
+    #                 ),
+    #                 # Nyström RBF LogReg: input is already scaled by the pipeline,
+    #                 # so only the kernel expansion is applied internally.
+    #                 PipelinedClassifierModel(
+    #                     preprocessors=[NystroemExpander(n_components=100, kernel="rbf")],
+    #                     classifier=LogisticRegressionModel(C=1.0, max_iter=5000),
+    #                 ),
+    #             ],
+    #             meta_model=LogisticRegressionModel(C=1.0, max_iter=2000),
+    #         ),
+    #     ),
+    # ),
+
+    # "Stacking-LGBM-LogReg": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
+    #         ],
+    #         model=ClassificationStackingModel(
+    #             base_models=[
+    #                 LightGBMClassifierModel(
+    #                     n_estimators=1000,
+    #                     learning_rate=0.05,
+    #                     num_leaves=63,
+    #                     min_child_samples=10,
+    #                     subsample=0.8,
+    #                     subsample_freq=1,
+    #                     colsample_bytree=0.8,
+    #                     reg_alpha=0.1,
+    #                     reg_lambda=0.1,
+    #                     early_stopping_rounds=50,
+    #                     class_weight="balanced",
+    #                 ),
+                    
+    #                 # Nyström RBF LogReg: input is already scaled by the pipeline,
+    #                 # so only the kernel expansion is applied internally.
+    #                 PipelinedClassifierModel(
+    #                     preprocessors=[NystroemExpander(n_components=100, kernel="rbf")],
+    #                     classifier=LogisticRegressionModel(C=1.0, max_iter=5000),
+    #                 ),
+    #             ],
+    #             meta_model=LogisticRegressionModel(C=1.0, max_iter=2000),
+    #         ),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
+    # "Preproc_Stacking-LGBM-LogReg": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
+    #         ],
+    #         model=ClassificationStackingModel(
+    #             base_models=[
+    #                 LightGBMClassifierModel(
+    #                     n_estimators=1000,
+    #                     learning_rate=0.05,
+    #                     num_leaves=63,
+    #                     min_child_samples=10,
+    #                     subsample=0.8,
+    #                     subsample_freq=1,
+    #                     colsample_bytree=0.8,
+    #                     reg_alpha=0.1,
+    #                     reg_lambda=0.1,
+    #                     early_stopping_rounds=50,
+    #                     class_weight="balanced",
+    #                 ),
+    #                 XGBoostClassifierModel(
+    #                     n_estimators=1000,
+    #                     learning_rate=0.05,
+    #                     max_depth=6,
+    #                     min_child_weight=5.0,
+    #                     subsample=0.8,
+    #                     colsample_bytree=0.8,
+    #                     reg_alpha=0.1,
+    #                     reg_lambda=1.0,
+    #                     early_stopping_rounds=50,
+    #                     class_weight="balanced",
+    #                 ),
+                    
+    #                 # Nyström RBF LogReg: input is already scaled by the pipeline,
+    #                 # so only the kernel expansion is applied internally.
+    #                 PipelinedClassifierModel(
+    #                     preprocessors=[NystroemExpander(n_components=100, kernel="rbf")],
+    #                     classifier=LogisticRegressionModel(C=1.0, max_iter=5000),
+    #                 ),
+    #             ],
+    #             meta_model=PipelinedClassifierModel(
+    #                 preprocessors=[NystroemExpander(n_components=20, kernel="rbf")],
+    #                 classifier=LogisticRegressionModel(C=1.0, max_iter=2000),
+    #             ),
+    #         ),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
+
+    # ── LogReg + degree-2 polynomial expansion of scaled numeric features ────────
+    # "LogReg-Poly2": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
+    #         ],
+    #         model=LogisticRegressionModel(C=1.0, max_iter=5000),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
+    # ── LogReg + Poly2 + PCA: decorrelate the ~77 polynomial features ─────────────
+    # "LogReg-Poly2-PCA": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
+    #             # PolynomialExpander(cols=NUMERIC_COLS_LOGREG, degree=2),
+    #             PCAReducer(variance_threshold=0.9),
+    #         ],
+    #         model=LogisticRegressionModel(C=1.0, max_iter=5000),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
+    # ── LogReg + polynomial + trig (sin/cos) expansions ──────────────────────────
+    # "LogReg-PolyTrig": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
+    #             PolyTrigExpander(cols=NUMERIC_COLS_LOGREG, degree=2, n_trig=1),
+    #         ],
+    #         model=LogisticRegressionModel(C=1.0, max_iter=5000),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
+    # ── Same but PCA-compressed to handle the ~99-feature expansion ──────────────
+    # "LogReg-PolyTrig-PCA": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
+    #             PolyTrigExpander(cols=NUMERIC_COLS_LOGREG, degree=2, n_trig=1),
+    #             PCAReducer(variance_threshold=0.95),
+    #         ],
+    #         model=LogisticRegressionModel(C=1.0, max_iter=5000),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
+    # ── LogReg + Nyström RBF kernel approximation ─────────────────────────────────
+    # "LogReg-Nystroem": ClassificationExperiment(
+    #     loader=loader,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             # TemporalFeatureExtractor(),
+    #             # FeatureScaler(cols=NUMERIC_COLS_LOGREG),
+    #             NystroemExpander(n_components=100, kernel="rbf"),
+    #         ],
+    #         model=LogisticRegressionModel(C=1.0, max_iter=5000),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
 }
 
 results_clf = {}
 for name, exp in class_experiments.items():
     console.print(Panel(f"[bold green]Running Classification: {name}[/bold green]"))
     results_clf[name] = exp.run()
+    logger.log(name, results_clf[name], kind="classification")
 
 # ── Summary Classification ───────────────────────────────────────────────────────
 clf_table = Table(title="Classification Performance Summary", show_header=True, header_style="bold cyan")
@@ -627,14 +849,15 @@ console.print("\n", clf_table)
 
 from ml.optimizer import LGBMOptimizer, XGBoostOptimizer, CatBoostOptimizer, LGBMClassifierOptimizer
 
-# console.print("\n", Panel("[bold yellow]CLASSIFIER OPTUNA OPTIMIZATION[/bold yellow]", expand=False))
+console.print("\n", Panel("[bold yellow]CLASSIFIER OPTUNA OPTIMIZATION[/bold yellow]", expand=False))
 # clf_optimizer = LGBMClassifierOptimizer(
 #     loader=loader_enhanced,
 #     n_trials=75,
-#     n_estimators=2000,
+#     n_estimators=1000,
 #     early_stopping_rounds=50,
 # )
 # clf_study = clf_optimizer.optimize()
+
 
 # optimizer = LGBMOptimizer(
 #     loader=loader_enhanced,

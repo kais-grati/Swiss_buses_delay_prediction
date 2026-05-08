@@ -6,25 +6,34 @@ class DelayBinner(ClassEncoder):
     """
     Converts continuous delay seconds into discrete classes.
 
-    Classes:
-    0: On-Time       (delay <= 60s,  includes early arrivals)
-    1: Slight Delay  (60s  < delay <= 180s, within SBB 3-min tolerance)
-    2: Moderate Delay(180s < delay <= 600s, likely missed connections)
-    3: Severe Delay  (delay > 600s)
+    Boundaries chosen from data exploration on dataset_705.parquet (n=502,890):
+      distribution peaks at 60-90s; <3% of rows exceed 300s, so coarse upper bins waste capacity.
+
+    Notes:
+        Balanced distribution bins: 10 60 100 160
     """
-    def __init__(self, bins=[15, 45, 90, 180]):
+    def __init__(self, bins=[90]):
         self.bins = bins
 
     def encode(self, y: pd.Series) -> pd.Series:
+        n_classes = len(self.bins) + 1
         return pd.cut(
             y,
-            bins=[-float('inf')] + self.bins + [float('inf')],
-            labels=[0, 1, 2, 3, 4]
+            bins=[-float('inf')] + list(self.bins) + [float('inf')],
+            labels=list(range(n_classes)),
         ).astype(int)
 
     def decode(self, y_encoded: np.ndarray) -> np.ndarray:
-        # Returns the midpoint of each bin as a representative value
-        midpoints = [7, 30, 67, 135, 270]
+        midpoints = []
+        edges = [-float('inf')] + list(self.bins) + [float('inf')]
+        for i in range(len(edges) - 1):
+            lo, hi = edges[i], edges[i + 1]
+            if lo == -float('inf'):
+                midpoints.append(hi - 30)
+            elif hi == float('inf'):
+                midpoints.append(lo + 50)
+            else:
+                midpoints.append((lo + hi) / 2)
         return np.array([midpoints[i] for i in y_encoded])
 
     @property

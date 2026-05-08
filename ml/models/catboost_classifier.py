@@ -17,7 +17,7 @@ class CatBoostClassifierModel(ClassifierModel):
         border_count: int = 254,
         min_data_in_leaf: int = 1,
         auto_class_weights: str | None = "Balanced",
-        early_stopping_rounds: int = 0,
+        early_stopping_rounds: int = 50,
         val_fraction: float = 0.1,
     ):
         self._early_stopping_rounds = early_stopping_rounds

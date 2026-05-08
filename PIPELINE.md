@@ -400,7 +400,8 @@ ml/
   pipeline.py                     # MLPipeline
   experiment.py                   # Experiment, ClassificationExperiment
   evaluation.py                   # Evaluator (regression + classification)
-  optimizer.py                    # LGBMOptimizer, XGBoostOptimizer, CatBoostOptimizer
+  optimizer.py                    # LGBMRegressorOptimizer, XGBoostRegressorOptimizer, CatBoostRegressorOptimizer,
+                                    #   LGBMClassifierOptimizer, OrdinalLGBMClassifierOptimizer
   logger.py                       # ExperimentLogger (appends results to results/experiment_log.jsonl)
   preprocessors/
     base.py                       # abstract BasePreprocessor
@@ -428,6 +429,8 @@ ml/
     lgbm_classifier.py            # LightGBMClassifierModel
     xgboost_classifier.py         # XGBoostClassifierModel
     catboost_classifier.py        # CatBoostClassifierModel
+    random_forest_classifier.py   # RandomForestClassifierModel
+    ordinal_classifier.py         # OrdinalClassifierModel (Frank & Hall K-1 binary decomposition)
     classification_stacking.py    # ClassificationStackingModel (probability OOF stacking)
     pipelined_classifier.py       # PipelinedClassifierModel (preprocessors + classifier as one unit)
 ```
@@ -464,22 +467,24 @@ Converts the continuous delay target into discrete classes before training.
 
 ### Target Encoding: `ClassEncoder` and `DelayBinner`
 
-`ClassEncoder` is the abstract base class. `DelayBinner` is the concrete implementation that bins `arrival_delay_s` into 4 classes using configurable thresholds:
+`ClassEncoder` is the abstract base class. `DelayBinner` is the concrete implementation that bins `arrival_delay_s` into classes using configurable thresholds:
 
 | Class | Range | Meaning |
 |-------|-------|---------|
-| 0 | delay ≤ 60s | On-time (includes early arrivals) |
-| 1 | 60s < delay ≤ 180s | Slight delay (within SBB 3-min tolerance) |
-| 2 | 180s < delay ≤ 600s | Moderate delay (likely missed connections) |
-| 3 | delay > 600s | Severe delay |
+| 0 | delay ≤ 0s | On-time or early |
+| 1 | 0s < delay ≤ 60s | Slight delay (within 1 min) |
+| 2 | 60s < delay ≤ 100s | Minor delay |
+| 3 | 100s < delay ≤ 160s | Moderate delay |
+| 4 | delay > 160s | Significant delay |
 
 The bin thresholds are configurable. `class_names` is auto-generated from `self.bins` and flows through to the evaluator for labeled output.
 
 ```python
-binner = DelayBinner()                   # default bins: [60, 180, 600]
-binner = DelayBinner(bins=[60, 300])     # custom 3-class variant
+binner = DelayBinner()                        # default bins: [0, 60, 100, 160]  → 5 classes
+binner = DelayBinner(bins=[60, 180, 600])     # operationally-grounded 4-class variant
+binner = DelayBinner(bins=[90])               # binary split at 90s  → 2 classes
 print(binner.class_names)
-# → ['≤60s', '60–180s', '180–600s', '>600s']
+# → ['≤0s', '0–60s', '60–100s', '100–160s', '>160s']
 ```
 
 ### `ClassificationExperiment`
@@ -653,14 +658,32 @@ df = pd.read_json("results/experiment_log.jsonl", lines=True)
 
 ## Hyperparameter Optimization
 
-`ml/optimizer.py` provides Optuna-based Bayesian optimizers for LightGBM, XGBoost, and CatBoost.
+`ml/optimizer.py` provides Optuna-based Bayesian optimizers for all model types. Naming convention distinguishes regression from classification:
+
+| Optimizer | Target | Tuned model |
+|-----------|--------|-------------|
+| `LGBMRegressorOptimizer` | RMSE | `LightGBMModel` |
+| `XGBoostRegressorOptimizer` | RMSE | `XGBoostModel` |
+| `CatBoostRegressorOptimizer` | RMSE | `CatBoostModel` |
+| `LGBMClassifierOptimizer` | Macro-F1 | `LightGBMClassifierModel` |
+| `OrdinalLGBMClassifierOptimizer` | Macro-F1 | `OrdinalClassifierModel(LightGBMClassifierModel)` |
+
+All optimizers tune `n_estimators` alongside architecture-specific hyperparameters via `trial.suggest_int("n_estimators", 100, self.n_estimators)`, where the constructor's `n_estimators` parameter acts as the upper bound.
 
 ```python
-from ml.optimizer import LGBMOptimizer
+from ml.optimizer import LGBMRegressorOptimizer, LGBMClassifierOptimizer
 
-optimizer = LGBMOptimizer(loader=loader_enhanced, numeric_cols=NUMERIC_COLS, n_trials=100)
+# Regression
+optimizer = LGBMRegressorOptimizer(loader=loader_enhanced, numeric_cols=NUMERIC_COLS, n_trials=100)
 study = optimizer.optimize()
 # prints best params and validation RMSE after each trial
+
+# Classification
+clf_optimizer = LGBMClassifierOptimizer(
+    loader=loader_enhanced, binner=DelayBinner(), n_trials=60, n_estimators=2000,
+)
+clf_study = clf_optimizer.optimize()
+# prints best params and validation macro-F1 after each trial
 ```
 
 Optimizers cache the loaded dataset on first call (`_load_once`) and use TPE sampling. Best parameters are printed at the end and can be copy-pasted directly into an `Experiment` definition in `main.py`.

@@ -15,6 +15,8 @@ from ml.models.classification_stacking import ClassificationStackingModel
 from ml.models.pipelined_classifier import PipelinedClassifierModel
 from ml.models.logistic_regression import LogisticRegressionModel
 from ml.models.catboost_classifier import CatBoostClassifierModel
+from ml.models.ordinal_classifier import OrdinalClassifierModel
+from ml.models.random_forest_classifier import RandomForestClassifierModel
 from ml.evaluation import Evaluator
 from ml.experiment import Experiment, ClassificationExperiment
 from ml.preprocessors.delay_binner import DelayBinner
@@ -33,7 +35,7 @@ console = Console()
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-DATASET = "data/dataset_705.parquet"
+DATASET = "data/dataset_705_echandens.parquet"
 TARGET  = "arrival_delay_s"
 
 DROP_COLS = [
@@ -460,20 +462,24 @@ class_experiments = {
     # ),
     # ── LGBM ───────────────────────────────────────────────
     # "LGBM-v1-1k-rebalanced_classes": ClassificationExperiment(
-    #     loader=loader,
+    #     loader=loader_enhanced,
     #     pipeline=MLPipeline(
     #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             FeatureScaler(NUMERIC_COLS)
     #         ],
     #         model=LightGBMClassifierModel(
     #             n_estimators=1000,
-    #             learning_rate=0.05,
-    #             num_leaves=63,
-    #             min_child_samples=10,
-    #             subsample=0.8,
+    #             learning_rate=0.07464436769258928,
+    #             num_leaves=80,
+    #             min_child_samples=30,
+    #             min_sum_hessian_in_leaf=0.007859583418210319,
+    #             subsample=0.9651336534916378,
     #             subsample_freq=1,
-    #             colsample_bytree=0.8,
-    #             reg_alpha=0.1,
-    #             reg_lambda=0.1,
+    #             colsample_bytree=0.8570097400335258,
+    #             feature_fraction_bynode=0.733164261500722,
+    #             reg_alpha=0.003622284016704569,
+    #             reg_lambda=0.6238096481891778,
     #             early_stopping_rounds=50,
     #             class_weight="balanced",
     #         ),
@@ -481,6 +487,120 @@ class_experiments = {
     #     evaluator=evaluator,
     #     encoder=binner,
     # ),
+    # ── LGBM (default) ──────────────────────────────────────────────────────
+    "LGBM-v1": ClassificationExperiment(
+        loader=loader_enhanced,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                # HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
+                FeatureScaler(NUMERIC_COLS ),
+            ],
+            model=LightGBMClassifierModel(
+                early_stopping_rounds=50,
+                n_estimators = 871,
+                learning_rate = 0.012640427507525883,
+                num_leaves = 76,
+                min_child_samples = 72,
+                min_sum_hessian_in_leaf = 0.000774294856017507,
+                subsample = 0.9742887241908837,
+                colsample_bytree = 0.4024274899752304,
+                feature_fraction_bynode = 0.8649700229855798,
+                reg_alpha = 0.01239086706698562,
+                reg_lambda = 0.00019579208402214886
+            ),
+        ),
+        evaluator=evaluator,
+        encoder=binner,
+    ),
+    # ── XGBoost (default) ────────────────────────────────────────────────────
+    "XGBoost-v1": ClassificationExperiment(
+        loader=loader_enhanced,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                # HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
+                FeatureScaler(NUMERIC_COLS ),
+            ],
+            model=XGBoostClassifierModel(
+                n_estimators = 1701,
+                learning_rate = 0.06237053859955787,
+                max_depth = 3,
+                min_child_weight = 13.415832894977182,
+                gamma = 0.03576555396806631,
+                subsample = 0.9489968100219347,
+                colsample_bytree = 0.44933374667783377,
+                colsample_bylevel = 0.967285333439918,
+                reg_alpha = 0.0017661547027850485,
+                reg_lambda = 0.7839210110834374
+            ),
+        ),
+        evaluator=evaluator,
+        encoder=binner,
+    ),
+    # ── CatBoost (default) ───────────────────────────────────────────────────
+    "CatBoost-v1": ClassificationExperiment(
+        loader=loader_enhanced,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                # HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
+                FeatureScaler(NUMERIC_COLS ),
+            ],
+            model=CatBoostClassifierModel(
+                early_stopping_rounds=50,
+            ),
+        ),
+        evaluator=evaluator,
+        encoder=binner,
+    ),
+    # ── Random Forest (default) ──────────────────────────────────────────────
+    "RandomForest-v1": ClassificationExperiment(
+        loader=loader_enhanced,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                # HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
+                FeatureScaler(NUMERIC_COLS ),
+            ],
+            model=RandomForestClassifierModel(
+                n_estimators = 275,
+                max_depth = 29,
+                min_samples_split = 12,
+                min_samples_leaf = 7,
+                max_features = None
+            ),
+        ),
+        evaluator=evaluator,
+        encoder=binner,
+    ),
+    # ── Ordinal LGBM ────────────────────────────────────────────────────────
+    "Ordinal-LGBM-v1": ClassificationExperiment(
+        loader=loader_enhanced,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                # HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_meadimsn_delay"),
+                FeatureScaler(NUMERIC_COLS ),
+            ],
+            model=OrdinalClassifierModel(
+                base_model=LightGBMClassifierModel(
+                    n_estimators = 166,
+                    learning_rate = 0.006018966874652439,
+                    num_leaves = 147,
+                    min_child_samples = 12,
+                    min_sum_hessian_in_leaf = 0.0001537852534699058,
+                    subsample = 0.7923097407871328,
+                    colsample_bytree = 0.49577036575939126,
+                    feature_fraction_bynode = 0.9992193261712309,
+                    reg_alpha = 0.00021930676830366464,
+                    reg_lambda = 0.017232126786473668
+                ),
+            ),
+        ),
+        evaluator=evaluator,
+        encoder=binner,
+    ),
     # ── LGBM: lower min_child_samples to help minority class 3 ──────────────────
     # "LGBM-v2-LowChild": ClassificationExperiment(
     #     loader=loader_enhanced,
@@ -847,35 +967,92 @@ console.print("\n", clf_table)
 
 # ── Hyperparameter Optimization ────────────────────────────────────────────────
 
-from ml.optimizer import LGBMOptimizer, XGBoostOptimizer, CatBoostOptimizer, LGBMClassifierOptimizer
+from ml.optimizer import LGBMRegressorOptimizer, XGBoostRegressorOptimizer, CatBoostRegressorOptimizer, LGBMClassifierOptimizer, OrdinalLGBMClassifierOptimizer, XGBoostClassifierOptimizer, CatBoostClassifierOptimizer, RandomForestClassifierOptimizer
 
 console.print("\n", Panel("[bold yellow]CLASSIFIER OPTUNA OPTIMIZATION[/bold yellow]", expand=False))
-# clf_optimizer = LGBMClassifierOptimizer(
+
+# ── Ordinal LGBM Optimizer ────────────────────────────────────────────────────
+"""
+                    n_estimators = 166,
+                    learning_rate = 0.006018966874652439,
+                    num_leaves = 147,
+                    min_child_samples = 12,
+                    min_sum_hessian_in_leaf = 0.0001537852534699058,
+                    subsample = 0.7923097407871328,
+                    colsample_bytree = 0.49577036575939126,
+                    feature_fraction_bynode = 0.9992193261712309,
+                    reg_alpha = 0.00021930676830366464,
+                    reg_lambda = 0.017232126786473668
+"""
+# ordinal_optimizer = OrdinalLGBMClassifierOptimizer(
 #     loader=loader_enhanced,
+#     binner=binner,
 #     n_trials=75,
-#     n_estimators=1000,
-#     early_stopping_rounds=50,
+#     n_estimators=800,
 # )
-# clf_study = clf_optimizer.optimize()
+# ordinal_study = ordinal_optimizer.optimize()
 
-
-# optimizer = LGBMOptimizer(
+"""
+                    n_estimators = 871
+                    learning_rate = 0.012640427507525883
+                    num_leaves = 76
+                    min_child_samples = 72
+                    min_sum_hessian_in_leaf = 0.000774294856017507
+                    subsample = 0.9742887241908837
+                    colsample_bytree = 0.4024274899752304
+                    feature_fraction_bynode = 0.8649700229855798
+                    reg_alpha = 0.01239086706698562
+                    reg_lambda = 0.00019579208402214886
+"""
+# optimizer = LGBMClassifierOptimizer(
 #     loader=loader_enhanced,
-#     numeric_cols=NUMERIC_COLS_ENHANCED,
-#     n_trials=100,
+#     n_trials=60,
 # )
 # study = optimizer.optimize()
 
-# optimizer = XGBoostOptimizer(
+"""
+                n_estimators = 1701
+                learning_rate = 0.06237053859955787
+                max_depth = 3
+                min_child_weight = 13.415832894977182
+                gamma = 0.03576555396806631
+                subsample = 0.9489968100219347
+                colsample_bytree = 0.44933374667783377
+                colsample_bylevel = 0.967285333439918
+                reg_alpha = 0.0017661547027850485
+                reg_lambda = 0.7839210110834374
+"""
+
+# optimizer = XGBoostClassifierOptimizer(
 #     loader=loader_enhanced,
-#     numeric_cols=NUMERIC_COLS,
-#     n_trials=100,
+#     binner=binner,
+#     n_trials=60,
+#     n_estimators=2000,
 # )
 # study = optimizer.optimize()
 
-# optimizer = CatBoostOptimizer(
+"""
+
+"""
+
+optimizer = CatBoostClassifierOptimizer(
+    loader=loader_enhanced,
+    binner=binner,
+    n_trials=60,
+)
+study = optimizer.optimize()
+
+"""
+            n_estimators = 275
+            max_depth = 29
+            min_samples_split = 12
+            min_samples_leaf = 7
+            max_features = None
+"""
+
+# optimizer = RandomForestClassifierOptimizer(
 #     loader=loader_enhanced,
-#     numeric_cols=NUMERIC_COLS,
-#     n_trials=100,
+#     binner=binner,
+#     n_trials=40,
 # )
 # study = optimizer.optimize()

@@ -20,7 +20,7 @@ class XGBoostClassifierModel(ClassifierModel):
         reg_alpha: float = 0.0,
         reg_lambda: float = 1.0,
         class_weight: str | None = "balanced",
-        early_stopping_rounds: int = 0,
+        early_stopping_rounds: int = 50,
         val_fraction: float = 0.1,
     ):
         self._early_stopping_rounds = early_stopping_rounds
@@ -37,8 +37,6 @@ class XGBoostClassifierModel(ClassifierModel):
             colsample_bylevel=colsample_bylevel,
             reg_alpha=reg_alpha,
             reg_lambda=reg_lambda,
-            eval_metric="mlogloss",
-            use_label_encoder=False,
             verbosity=0,
             n_jobs=-1,
         )

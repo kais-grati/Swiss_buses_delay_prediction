@@ -24,7 +24,7 @@ class LightGBMClassifierModel(ClassifierModel):
         min_gain_to_split: float = 0.0,
         path_smooth: float = 0.0,
         class_weight: str | None = "balanced",
-        early_stopping_rounds: int = 0,
+        early_stopping_rounds: int = 50,
         val_fraction: float = 0.1,
         log_every: int = 0,
     ):

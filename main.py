@@ -24,6 +24,7 @@ from ml.preprocessors.polynomial import PolynomialExpander
 from ml.preprocessors.pca import PCAReducer
 from ml.preprocessors.poly_trig import PolyTrigExpander
 from ml.preprocessors.nystroem import NystroemExpander
+from ml.preprocessors.wind_merger import WindMerger
 from ml.logger import ExperimentLogger
 
 from rich.console import Console
@@ -62,6 +63,12 @@ NUMERIC_COLS_LOGREG_FULL = NUMERIC_COLS + TEMPORAL_COLS + ["wind_chill", "hist_m
 
 # Enhanced set for tree models (trees don't need temporal scaling but benefit from engineered features)
 NUMERIC_COLS_ENHANCED = NUMERIC_COLS + ["wind_chill"]
+
+# Scaled numeric set for logistic regression after WindMerger + TemporalFeatureExtractor
+LOGREG_NUMERIC = [
+    "temperature", "precipitation", "sunshine", "humidity",
+    "wind", "pressure", "snow_depth", "hour", "dow", "month",
+]
 
 # ── Experiments ────────────────────────────────────────────────────────────────
 
@@ -445,377 +452,226 @@ console.print("\n", Panel("[bold green]CLASSIFICATION EXPERIMENTS[/bold green]",
 binner = DelayBinner()
 
 class_experiments = {
-    # ── LogReg best (ElasticNet + full features) — linear ceiling reference ──────
-    # "LogReg-ElasticNet": ClassificationExperiment(
+    # "LogReg-Best": ClassificationExperiment(
     #     loader=loader_enhanced,
     #     pipeline=MLPipeline(
     #         preprocessors=[
     #             TemporalFeatureExtractor(),
-    #             WeatherFeatureEngineer(),
-    #             HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
-    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG_FULL),
+    #             WindMerger(),
+    #             FeatureScaler(cols=LOGREG_NUMERIC),
+    #             PolynomialExpander(cols=LOGREG_NUMERIC, degree=2),
+    #             PCAReducer(variance_threshold=0.99),
     #         ],
     #         model=LogisticRegressionModel(C=1.0, l1_ratio=0.5, max_iter=5000),
     #     ),
     #     evaluator=evaluator,
     #     encoder=binner,
     # ),
-    # ── LGBM ───────────────────────────────────────────────
-    # "LGBM-v1-1k-rebalanced_classes": ClassificationExperiment(
+    # "LogReg-PolyTrig": ClassificationExperiment(
     #     loader=loader_enhanced,
     #     pipeline=MLPipeline(
     #         preprocessors=[
     #             TemporalFeatureExtractor(),
-    #             FeatureScaler(NUMERIC_COLS)
+    #             WindMerger(),
+    #             FeatureScaler(cols=LOGREG_NUMERIC),
+    #             PolyTrigExpander(cols=LOGREG_NUMERIC, degree=2),
+    #             PCAReducer(variance_threshold=0.99),
     #         ],
-    #         model=LightGBMClassifierModel(
-    #             n_estimators=1000,
-    #             learning_rate=0.07464436769258928,
-    #             num_leaves=80,
-    #             min_child_samples=30,
-    #             min_sum_hessian_in_leaf=0.007859583418210319,
-    #             subsample=0.9651336534916378,
-    #             subsample_freq=1,
-    #             colsample_bytree=0.8570097400335258,
-    #             feature_fraction_bynode=0.733164261500722,
-    #             reg_alpha=0.003622284016704569,
-    #             reg_lambda=0.6238096481891778,
-    #             early_stopping_rounds=50,
-    #             class_weight="balanced",
-    #         ),
+    #         model=LogisticRegressionModel(C=1.0, l1_ratio=0.5, max_iter=5000),
     #     ),
     #     evaluator=evaluator,
     #     encoder=binner,
     # ),
-    # ── LGBM (default) ──────────────────────────────────────────────────────
-    "LGBM-v1": ClassificationExperiment(
-        loader=loader_enhanced,
-        pipeline=MLPipeline(
-            preprocessors=[
-                TemporalFeatureExtractor(),
-                # HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
-                FeatureScaler(NUMERIC_COLS ),
-            ],
-            model=LightGBMClassifierModel(
-                early_stopping_rounds=50,
-                n_estimators = 871,
-                learning_rate = 0.012640427507525883,
-                num_leaves = 76,
-                min_child_samples = 72,
-                min_sum_hessian_in_leaf = 0.000774294856017507,
-                subsample = 0.9742887241908837,
-                colsample_bytree = 0.4024274899752304,
-                feature_fraction_bynode = 0.8649700229855798,
-                reg_alpha = 0.01239086706698562,
-                reg_lambda = 0.00019579208402214886
-            ),
-        ),
-        evaluator=evaluator,
-        encoder=binner,
-    ),
-    # ── XGBoost (default) ────────────────────────────────────────────────────
-    "XGBoost-v1": ClassificationExperiment(
-        loader=loader_enhanced,
-        pipeline=MLPipeline(
-            preprocessors=[
-                TemporalFeatureExtractor(),
-                # HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
-                FeatureScaler(NUMERIC_COLS ),
-            ],
-            model=XGBoostClassifierModel(
-                n_estimators = 1701,
-                learning_rate = 0.06237053859955787,
-                max_depth = 3,
-                min_child_weight = 13.415832894977182,
-                gamma = 0.03576555396806631,
-                subsample = 0.9489968100219347,
-                colsample_bytree = 0.44933374667783377,
-                colsample_bylevel = 0.967285333439918,
-                reg_alpha = 0.0017661547027850485,
-                reg_lambda = 0.7839210110834374
-            ),
-        ),
-        evaluator=evaluator,
-        encoder=binner,
-    ),
-    # ── CatBoost (default) ───────────────────────────────────────────────────
-    "CatBoost-v1": ClassificationExperiment(
-        loader=loader_enhanced,
-        pipeline=MLPipeline(
-            preprocessors=[
-                TemporalFeatureExtractor(),
-                # HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
-                FeatureScaler(NUMERIC_COLS ),
-            ],
-            model=CatBoostClassifierModel(
-                early_stopping_rounds=50,
-            ),
-        ),
-        evaluator=evaluator,
-        encoder=binner,
-    ),
-    # ── Random Forest (default) ──────────────────────────────────────────────
-    "RandomForest-v1": ClassificationExperiment(
-        loader=loader_enhanced,
-        pipeline=MLPipeline(
-            preprocessors=[
-                TemporalFeatureExtractor(),
-                # HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
-                FeatureScaler(NUMERIC_COLS ),
-            ],
-            model=RandomForestClassifierModel(
-                n_estimators = 275,
-                max_depth = 29,
-                min_samples_split = 12,
-                min_samples_leaf = 7,
-                max_features = None
-            ),
-        ),
-        evaluator=evaluator,
-        encoder=binner,
-    ),
-    # ── Ordinal LGBM ────────────────────────────────────────────────────────
-    "Ordinal-LGBM-v1": ClassificationExperiment(
-        loader=loader_enhanced,
-        pipeline=MLPipeline(
-            preprocessors=[
-                TemporalFeatureExtractor(),
-                # HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_meadimsn_delay"),
-                FeatureScaler(NUMERIC_COLS ),
-            ],
-            model=OrdinalClassifierModel(
-                base_model=LightGBMClassifierModel(
-                    n_estimators = 166,
-                    learning_rate = 0.006018966874652439,
-                    num_leaves = 147,
-                    min_child_samples = 12,
-                    min_sum_hessian_in_leaf = 0.0001537852534699058,
-                    subsample = 0.7923097407871328,
-                    colsample_bytree = 0.49577036575939126,
-                    feature_fraction_bynode = 0.9992193261712309,
-                    reg_alpha = 0.00021930676830366464,
-                    reg_lambda = 0.017232126786473668
-                ),
-            ),
-        ),
-        evaluator=evaluator,
-        encoder=binner,
-    ),
-    # ── LGBM: lower min_child_samples to help minority class 3 ──────────────────
-    # "LGBM-v2-LowChild": ClassificationExperiment(
+    # "LogReg-RBF": ClassificationExperiment(
     #     loader=loader_enhanced,
     #     pipeline=MLPipeline(
     #         preprocessors=[
     #             TemporalFeatureExtractor(),
-    #             WeatherFeatureEngineer(),
-    #             HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
+    #             WindMerger(),
+    #             FeatureScaler(cols=LOGREG_NUMERIC),
+    #             NystroemExpander(),
+    #             PCAReducer(variance_threshold=0.99),
     #         ],
-    #         model=LightGBMClassifierModel(
-    #             n_estimators=2000,
-    #             learning_rate=0.03,
-    #             num_leaves=63,
-    #             min_child_samples=1,
-    #             min_sum_hessian_in_leaf=1e-5,
-    #             subsample=0.8,
-    #             subsample_freq=1,
-    #             colsample_bytree=0.8,
-    #             reg_alpha=0.1,
-    #             reg_lambda=0.1,
-    #             early_stopping_rounds=50,
-    #             class_weight="balanced",
-    #         ),
+    #         model=LogisticRegressionModel(C=1, l1_ratio=0.5, max_iter=5000),
     #     ),
     #     evaluator=evaluator,
     #     encoder=binner,
     # ),
-    # ── LGBM: deeper trees + richer hist features ────────────────────────────────
-    # "LGBM-v3-DeepHist": ClassificationExperiment(
+    # "LogReg-PCA": ClassificationExperiment(
     #     loader=loader_enhanced,
     #     pipeline=MLPipeline(
     #         preprocessors=[
     #             TemporalFeatureExtractor(),
-    #             WeatherFeatureEngineer(),
-    #             HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
-    #             HistoricalMeanEncoder(group_cols=["hour"], output_col="hist_mean_hour"),
-    #             HistoricalMeanEncoder(group_cols=["dow"], output_col="hist_mean_dow"),
+    #             WindMerger(),
+    #             FeatureScaler(cols=LOGREG_NUMERIC),
+    #             PCAReducer(variance_threshold=0.99),
     #         ],
-    #         model=LightGBMClassifierModel(
-    #             n_estimators=2000,
-    #             learning_rate=0.03,
-    #             num_leaves=127,
-    #             min_child_samples=5,
-    #             subsample=0.8,
-    #             subsample_freq=1,
-    #             colsample_bytree=0.8,
-    #             feature_fraction_bynode=0.9,
-    #             reg_alpha=0.05,
-    #             reg_lambda=0.05,
-    #             early_stopping_rounds=50,
-    #             class_weight="balanced",
-    #         ),
+    #         model=LogisticRegressionModel(C=1.0, l1_ratio=0.5, max_iter=5000),
     #     ),
     #     evaluator=evaluator,
     #     encoder=binner,
-    # ),
-    # ── XGBoost ───────────────────────────────────────────────────────────────────
-    # "XGBoost-Classifier": ClassificationExperiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             FeatureScaler(NUMERIC_COLS)
-    #         ],
-    #         model=XGBoostClassifierModel(
-    #             n_estimators=1000,
-    #             learning_rate=0.05,
-    #             max_depth=6,
-    #             min_child_weight=5.0,
-    #             subsample=0.8,
-    #             colsample_bytree=0.8,
-    #             reg_alpha=0.1,
-    #             reg_lambda=1.0,
-    #             early_stopping_rounds=50,
-    #             class_weight="balanced",
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    #     encoder=binner,
-    # ),
-    # ── LGBM: manual class weights — heavily boost rare class 3 ──────────────────
-    # "LGBM-v4-HeavyClass3": ClassificationExperiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             WeatherFeatureEngineer(),
-    #             HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
-    #         ],
-    #         model=LightGBMClassifierModel(
-    #             n_estimators=1000,
-    #             learning_rate=0.05,
-    #             num_leaves=63,
-    #             min_child_samples=1,
-    #             min_sum_hessian_in_leaf=1e-5,
-    #             subsample=0.8,
-    #             subsample_freq=1,
-    #             colsample_bytree=0.8,
-    #             reg_alpha=0.1,
-    #             reg_lambda=0.1,
-    #             early_stopping_rounds=50,
-    #             # manual weights: inversely proportional to class frequency, but 10x boost on class 3
-    #             class_weight={0: 1.0, 1: 1.08, 2: 3.32, 3: 100.0},
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    #     encoder=binner,
-    # ),
-    # ── CatBoost (fixed: Accuracy eval metric) ────────────────────────────────────
-    # ── CatBoost: no class weighting — natural class distribution ────────────────
-    # "CatBoost-NoWeights": ClassificationExperiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             FeatureScaler(NUMERIC_COLS)
-    #         ],
-    #         model=CatBoostClassifierModel(
-    #             n_estimators=1000,
-    #             learning_rate=0.05,
-    #             depth=6,
-    #             l2_leaf_reg=3.0,
-    #             min_data_in_leaf=5,
-    #             auto_class_weights=None,
-    #             early_stopping_rounds=50,
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    #     encoder=binner,
-    # ),
-    # ── Stacking: LGBM + XGBoost + CatBoost + LogReg → LogisticRegression meta-learner ──
-    # "Stacking-LGBM-XGB-CatBoost-LogReg": ClassificationExperiment(
-    #     loader=loader_enhanced,
-    #     evaluator=evaluator,
-    #     encoder=binner,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
-    #         ],
-    #         model=ClassificationStackingModel(
-    #             base_models=[
-    #                 LightGBMClassifierModel(
-    #                     n_estimators=1000,
-    #                     learning_rate=0.05,
-    #                     num_leaves=63,
-    #                     min_child_samples=10,
-    #                     subsample=0.8,
-    #                     subsample_freq=1,
-    #                     colsample_bytree=0.8,
-    #                     reg_alpha=0.1,
-    #                     reg_lambda=0.1,
-    #                     early_stopping_rounds=50,
-    #                     class_weight="balanced",
-    #                 ),
-    #                 XGBoostClassifierModel(
-    #                     n_estimators=1000,
-    #                     learning_rate=0.05,
-    #                     max_depth=6,
-    #                     min_child_weight=5.0,
-    #                     subsample=0.8,
-    #                     colsample_bytree=0.8,
-    #                     reg_alpha=0.1,
-    #                     reg_lambda=1.0,
-    #                     early_stopping_rounds=50,
-    #                     class_weight="balanced",
-    #                 ),
-    #                 CatBoostClassifierModel(
-    #                     n_estimators=1000,
-    #                     learning_rate=0.05,
-    #                     depth=6,
-    #                     l2_leaf_reg=3.0,
-    #                     min_data_in_leaf=5,
-    #                     early_stopping_rounds=50,
-    #                 ),
-    #                 # Nyström RBF LogReg: input is already scaled by the pipeline,
-    #                 # so only the kernel expansion is applied internally.
-    #                 PipelinedClassifierModel(
-    #                     preprocessors=[NystroemExpander(n_components=100, kernel="rbf")],
-    #                     classifier=LogisticRegressionModel(C=1.0, max_iter=5000),
-    #                 ),
-    #             ],
-    #             meta_model=LogisticRegressionModel(C=1.0, max_iter=2000),
-    #         ),
-    #     ),
     # ),
 
-    # "Stacking-LGBM-LogReg": ClassificationExperiment(
+    # "LGBM-v1": ClassificationExperiment(
     #     loader=loader_enhanced,
     #     pipeline=MLPipeline(
     #         preprocessors=[
     #             TemporalFeatureExtractor(),
-    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
+    #             WindMerger(),
+    #             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth",]),
+    #         ],
+    #         model=LightGBMClassifierModel(
+    #             early_stopping_rounds=50,
+    #             n_estimators = 871,
+    #             learning_rate = 0.012640427507525883,
+    #             num_leaves = 76,
+    #             min_child_samples = 72,
+    #             min_sum_hessian_in_leaf = 0.000774294856017507,
+    #             subsample = 0.9742887241908837,
+    #             colsample_bytree = 0.4024274899752304,
+    #             feature_fraction_bynode = 0.8649700229855798,
+    #             reg_alpha = 0.01239086706698562,
+    #             reg_lambda = 0.00019579208402214886
+    #         ),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
+    # "XGBoost-v1": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             WindMerger(),
+    #             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth",]),
+    #         ],
+    #         model=XGBoostClassifierModel(
+    #             n_estimators = 1701,
+    #             learning_rate = 0.06237053859955787,
+    #             max_depth = 3,
+    #             min_child_weight = 13.415832894977182,
+    #             gamma = 0.03576555396806631,
+    #             subsample = 0.9489968100219347,
+    #             colsample_bytree = 0.44933374667783377,
+    #             colsample_bylevel = 0.967285333439918,
+    #             reg_alpha = 0.0017661547027850485,
+    #             reg_lambda = 0.7839210110834374
+    #         ),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
+    # "CatBoost-v1": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             WindMerger(),
+    #             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth",]),
+    #         ],
+    #         model=CatBoostClassifierModel(
+    #             n_estimators = 1383,
+    #             learning_rate = 0.056493591341501975,
+    #             depth = 6,
+    #             l2_leaf_reg = 0.14099692356305613,
+    #             random_strength = 0.13401645297925754,
+    #             bagging_temperature = 0.3213291097403033,
+    #             min_data_in_leaf = 59
+    #         ),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
+    # "RandomForest-v1": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             WindMerger(),
+    #             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth",]),
+    #         ],
+    #         model=RandomForestClassifierModel(
+    #             n_estimators = 275,
+    #             max_depth = 29,
+    #             min_samples_split = 12,
+    #             min_samples_leaf = 7,
+    #             max_features = None
+    #         ),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
+    # "Ordinal-LGBM-v1": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             WindMerger(),
+    #             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth",]),
+    #         ],
+    #         model=OrdinalClassifierModel(
+    #             base_model=LightGBMClassifierModel(
+    #                 n_estimators = 166,
+    #                 learning_rate = 0.006018966874652439,
+    #                 num_leaves = 147,
+    #                 min_child_samples = 12,
+    #                 min_sum_hessian_in_leaf = 0.0001537852534699058,
+    #                 subsample = 0.7923097407871328,
+    #                 colsample_bytree = 0.49577036575939126,
+    #                 feature_fraction_bynode = 0.9992193261712309,
+    #                 reg_alpha = 0.00021930676830366464,
+    #                 reg_lambda = 0.017232126786473668
+    #             ),
+    #         ),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
+
+    # "Stacking-Boost3": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             WindMerger(),
+    #             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth"]),
     #         ],
     #         model=ClassificationStackingModel(
     #             base_models=[
     #                 LightGBMClassifierModel(
-    #                     n_estimators=1000,
-    #                     learning_rate=0.05,
-    #                     num_leaves=63,
-    #                     min_child_samples=10,
-    #                     subsample=0.8,
-    #                     subsample_freq=1,
-    #                     colsample_bytree=0.8,
-    #                     reg_alpha=0.1,
-    #                     reg_lambda=0.1,
+    #                     n_estimators=871,
+    #                     learning_rate=0.012640427507525883,
+    #                     num_leaves=76,
+    #                     min_child_samples=72,
+    #                     min_sum_hessian_in_leaf=0.000774294856017507,
+    #                     subsample=0.9742887241908837,
+    #                     colsample_bytree=0.4024274899752304,
+    #                     feature_fraction_bynode=0.8649700229855798,
+    #                     reg_alpha=0.01239086706698562,
+    #                     reg_lambda=0.00019579208402214886,
     #                     early_stopping_rounds=50,
-    #                     class_weight="balanced",
     #                 ),
-                    
-    #                 # Nyström RBF LogReg: input is already scaled by the pipeline,
-    #                 # so only the kernel expansion is applied internally.
-    #                 PipelinedClassifierModel(
-    #                     preprocessors=[NystroemExpander(n_components=100, kernel="rbf")],
-    #                     classifier=LogisticRegressionModel(C=1.0, max_iter=5000),
+    #                 XGBoostClassifierModel(
+    #                     n_estimators=1701,
+    #                     learning_rate=0.06237053859955787,
+    #                     max_depth=3,
+    #                     min_child_weight=13.415832894977182,
+    #                     gamma=0.03576555396806631,
+    #                     subsample=0.9489968100219347,
+    #                     colsample_bytree=0.44933374667783377,
+    #                     colsample_bylevel=0.967285333439918,
+    #                     reg_alpha=0.0017661547027850485,
+    #                     reg_lambda=0.7839210110834374,
+    #                     early_stopping_rounds=50,
+    #                 ),
+    #                 CatBoostClassifierModel(
+    #                     n_estimators=1383,
+    #                     learning_rate=0.056493591341501975,
+    #                     depth=6,
+    #                     l2_leaf_reg=0.14099692356305613,
+    #                     random_strength=0.13401645297925754,
+    #                     bagging_temperature=0.3213291097403033,
+    #                     min_data_in_leaf=59,
     #                 ),
     #             ],
     #             meta_model=LogisticRegressionModel(C=1.0, max_iter=2000),
@@ -824,50 +680,57 @@ class_experiments = {
     #     evaluator=evaluator,
     #     encoder=binner,
     # ),
-    # "Preproc_Stacking-LGBM-LogReg": ClassificationExperiment(
+
+    # "Stacking-Boost3-PolyMeta": ClassificationExperiment(
     #     loader=loader_enhanced,
     #     pipeline=MLPipeline(
     #         preprocessors=[
     #             TemporalFeatureExtractor(),
-    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
+    #             WindMerger(),
+    #             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth"]),
     #         ],
     #         model=ClassificationStackingModel(
     #             base_models=[
     #                 LightGBMClassifierModel(
-    #                     n_estimators=1000,
-    #                     learning_rate=0.05,
-    #                     num_leaves=63,
-    #                     min_child_samples=10,
-    #                     subsample=0.8,
-    #                     subsample_freq=1,
-    #                     colsample_bytree=0.8,
-    #                     reg_alpha=0.1,
-    #                     reg_lambda=0.1,
+    #                     n_estimators=871,
+    #                     learning_rate=0.012640427507525883,
+    #                     num_leaves=76,
+    #                     min_child_samples=72,
+    #                     min_sum_hessian_in_leaf=0.000774294856017507,
+    #                     subsample=0.9742887241908837,
+    #                     colsample_bytree=0.4024274899752304,
+    #                     feature_fraction_bynode=0.8649700229855798,
+    #                     reg_alpha=0.01239086706698562,
+    #                     reg_lambda=0.00019579208402214886,
     #                     early_stopping_rounds=50,
-    #                     class_weight="balanced",
     #                 ),
     #                 XGBoostClassifierModel(
-    #                     n_estimators=1000,
-    #                     learning_rate=0.05,
-    #                     max_depth=6,
-    #                     min_child_weight=5.0,
-    #                     subsample=0.8,
-    #                     colsample_bytree=0.8,
-    #                     reg_alpha=0.1,
-    #                     reg_lambda=1.0,
+    #                     n_estimators=1701,
+    #                     learning_rate=0.06237053859955787,
+    #                     max_depth=3,
+    #                     min_child_weight=13.415832894977182,
+    #                     gamma=0.03576555396806631,
+    #                     subsample=0.9489968100219347,
+    #                     colsample_bytree=0.44933374667783377,
+    #                     colsample_bylevel=0.967285333439918,
+    #                     reg_alpha=0.0017661547027850485,
+    #                     reg_lambda=0.7839210110834374,
     #                     early_stopping_rounds=50,
-    #                     class_weight="balanced",
     #                 ),
-                    
-    #                 # Nyström RBF LogReg: input is already scaled by the pipeline,
-    #                 # so only the kernel expansion is applied internally.
-    #                 PipelinedClassifierModel(
-    #                     preprocessors=[NystroemExpander(n_components=100, kernel="rbf")],
-    #                     classifier=LogisticRegressionModel(C=1.0, max_iter=5000),
+    #                 CatBoostClassifierModel(
+    #                     n_estimators=1383,
+    #                     learning_rate=0.056493591341501975,
+    #                     depth=6,
+    #                     l2_leaf_reg=0.14099692356305613,
+    #                     random_strength=0.13401645297925754,
+    #                     bagging_temperature=0.3213291097403033,
+    #                     min_data_in_leaf=59,
     #                 ),
     #             ],
     #             meta_model=PipelinedClassifierModel(
-    #                 preprocessors=[NystroemExpander(n_components=20, kernel="rbf")],
+    #                 preprocessors=[
+    #                     PCAReducer(variance_threshold=0.99),
+    #                 ],
     #                 classifier=LogisticRegressionModel(C=1.0, max_iter=2000),
     #             ),
     #         ),
@@ -876,77 +739,89 @@ class_experiments = {
     #     encoder=binner,
     # ),
 
-    # ── LogReg + degree-2 polynomial expansion of scaled numeric features ────────
-    # "LogReg-Poly2": ClassificationExperiment(
+    # "Stacking-LGBM-RF": ClassificationExperiment(
     #     loader=loader_enhanced,
     #     pipeline=MLPipeline(
     #         preprocessors=[
     #             TemporalFeatureExtractor(),
-    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
+    #             WindMerger(),
+    #             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth"]),
     #         ],
-    #         model=LogisticRegressionModel(C=1.0, max_iter=5000),
+    #         model=ClassificationStackingModel(
+    #             base_models=[
+    #                 LightGBMClassifierModel(
+    #                     n_estimators=871,
+    #                     learning_rate=0.012640427507525883,
+    #                     num_leaves=76,
+    #                     min_child_samples=72,
+    #                     min_sum_hessian_in_leaf=0.000774294856017507,
+    #                     subsample=0.9742887241908837,
+    #                     colsample_bytree=0.4024274899752304,
+    #                     feature_fraction_bynode=0.8649700229855798,
+    #                     reg_alpha=0.01239086706698562,
+    #                     reg_lambda=0.00019579208402214886,
+    #                     early_stopping_rounds=50,
+    #                 ),
+    #                 RandomForestClassifierModel(
+    #                     n_estimators=275,
+    #                     max_depth=29,
+    #                     min_samples_split=12,
+    #                     min_samples_leaf=7,
+    #                     max_features=None,
+    #                 ),
+    #             ],
+    #             meta_model=LogisticRegressionModel(C=1.0, max_iter=2000),
+    #         ),
     #     ),
     #     evaluator=evaluator,
     #     encoder=binner,
     # ),
-    # ── LogReg + Poly2 + PCA: decorrelate the ~77 polynomial features ─────────────
-    # "LogReg-Poly2-PCA": ClassificationExperiment(
+
+    # "Stacking-LGBM-RF-LogReg": ClassificationExperiment(
     #     loader=loader_enhanced,
     #     pipeline=MLPipeline(
     #         preprocessors=[
     #             TemporalFeatureExtractor(),
-    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
-    #             # PolynomialExpander(cols=NUMERIC_COLS_LOGREG, degree=2),
-    #             PCAReducer(variance_threshold=0.9),
+    #             WindMerger(),
+    #             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth"]),
     #         ],
-    #         model=LogisticRegressionModel(C=1.0, max_iter=5000),
+    #         model=ClassificationStackingModel(
+    #             base_models=[
+    #                 LightGBMClassifierModel(
+    #                     n_estimators=871,
+    #                     learning_rate=0.012640427507525883,
+    #                     num_leaves=76,
+    #                     min_child_samples=72,
+    #                     min_sum_hessian_in_leaf=0.000774294856017507,
+    #                     subsample=0.9742887241908837,
+    #                     colsample_bytree=0.4024274899752304,
+    #                     feature_fraction_bynode=0.8649700229855798,
+    #                     reg_alpha=0.01239086706698562,
+    #                     reg_lambda=0.00019579208402214886,
+    #                     early_stopping_rounds=50,
+    #                 ),
+    #                 RandomForestClassifierModel(
+    #                     n_estimators=275,
+    #                     max_depth=29,
+    #                     min_samples_split=12,
+    #                     min_samples_leaf=7,
+    #                     max_features=None,
+    #                 ),
+    #                 PipelinedClassifierModel(
+    #                     preprocessors=[
+    #                         PolynomialExpander(cols=LOGREG_NUMERIC, degree=2),
+    #                         PCAReducer(variance_threshold=0.99),
+    #                     ],
+    #                     classifier=LogisticRegressionModel(C=1.0, l1_ratio=0.5, max_iter=5000),
+    #                 ),
+    #             ],
+    #             meta_model=LogisticRegressionModel(C=1.0, max_iter=2000),
+    #         ),
     #     ),
     #     evaluator=evaluator,
     #     encoder=binner,
     # ),
-    # ── LogReg + polynomial + trig (sin/cos) expansions ──────────────────────────
-    # "LogReg-PolyTrig": ClassificationExperiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
-    #             PolyTrigExpander(cols=NUMERIC_COLS_LOGREG, degree=2, n_trig=1),
-    #         ],
-    #         model=LogisticRegressionModel(C=1.0, max_iter=5000),
-    #     ),
-    #     evaluator=evaluator,
-    #     encoder=binner,
-    # ),
-    # ── Same but PCA-compressed to handle the ~99-feature expansion ──────────────
-    # "LogReg-PolyTrig-PCA": ClassificationExperiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             FeatureScaler(cols=NUMERIC_COLS_LOGREG),
-    #             PolyTrigExpander(cols=NUMERIC_COLS_LOGREG, degree=2, n_trig=1),
-    #             PCAReducer(variance_threshold=0.95),
-    #         ],
-    #         model=LogisticRegressionModel(C=1.0, max_iter=5000),
-    #     ),
-    #     evaluator=evaluator,
-    #     encoder=binner,
-    # ),
-    # ── LogReg + Nyström RBF kernel approximation ─────────────────────────────────
-    # "LogReg-Nystroem": ClassificationExperiment(
-    #     loader=loader,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             # TemporalFeatureExtractor(),
-    #             # FeatureScaler(cols=NUMERIC_COLS_LOGREG),
-    #             NystroemExpander(n_components=100, kernel="rbf"),
-    #         ],
-    #         model=LogisticRegressionModel(C=1.0, max_iter=5000),
-    #     ),
-    #     evaluator=evaluator,
-    #     encoder=binner,
-    # ),
+
 }
 
 results_clf = {}
@@ -1032,15 +907,21 @@ console.print("\n", Panel("[bold yellow]CLASSIFIER OPTUNA OPTIMIZATION[/bold yel
 # study = optimizer.optimize()
 
 """
-
+            n_estimators = 1383
+            learning_rate = 0.056493591341501975
+            depth = 6
+            l2_leaf_reg = 0.14099692356305613
+            random_strength = 0.13401645297925754
+            bagging_temperature = 0.3213291097403033
+            min_data_in_leaf = 59
 """
 
-optimizer = CatBoostClassifierOptimizer(
-    loader=loader_enhanced,
-    binner=binner,
-    n_trials=60,
-)
-study = optimizer.optimize()
+# optimizer = CatBoostClassifierOptimizer(
+#     loader=loader_enhanced,
+#     binner=binner,
+#     n_trials=40,
+# )
+# study = optimizer.optimize()
 
 """
             n_estimators = 275

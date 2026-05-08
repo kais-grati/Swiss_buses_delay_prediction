@@ -173,11 +173,14 @@ class LGBMClassifierOptimizer:
     def optimize(self) -> optuna.Study:
         sampler = optuna.samplers.TPESampler(seed=self.seed)
         study = optuna.create_study(direction="maximize", sampler=sampler)
-        study.optimize(
-            self._objective,
-            n_trials=self.n_trials,
-            show_progress_bar=True,
-        )
+        try:
+            study.optimize(
+                self._objective,
+                n_trials=self.n_trials,
+                show_progress_bar=True,
+            )
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user. Printing best results found so far...")
 
         print(f"\nBest macro-F1: {study.best_value:.4f}")
         print("Best params:")
@@ -487,11 +490,14 @@ class XGBoostClassifierOptimizer:
     def optimize(self) -> optuna.Study:
         sampler = optuna.samplers.TPESampler(seed=self.seed)
         study = optuna.create_study(direction="maximize", sampler=sampler)
-        study.optimize(
-            self._objective,
-            n_trials=self.n_trials,
-            show_progress_bar=True,
-        )
+        try:
+            study.optimize(
+                self._objective,
+                n_trials=self.n_trials,
+                show_progress_bar=True,
+            )
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user. Printing best results found so far...")
 
         print(f"\nBest macro-F1: {study.best_value:.4f}")
         print("Best params:")
@@ -569,11 +575,14 @@ class CatBoostClassifierOptimizer:
     def optimize(self) -> optuna.Study:
         sampler = optuna.samplers.TPESampler(seed=self.seed)
         study = optuna.create_study(direction="maximize", sampler=sampler)
-        study.optimize(
-            self._objective,
-            n_trials=self.n_trials,
-            show_progress_bar=True,
-        )
+        try:
+            study.optimize(
+                self._objective,
+                n_trials=self.n_trials,
+                show_progress_bar=True,
+            )
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user. Printing best results found so far...")
 
         print(f"\nBest macro-F1: {study.best_value:.4f}")
         print("Best params:")
@@ -650,11 +659,14 @@ class RandomForestClassifierOptimizer:
     def optimize(self) -> optuna.Study:
         sampler = optuna.samplers.TPESampler(seed=self.seed)
         study = optuna.create_study(direction="maximize", sampler=sampler)
-        study.optimize(
-            self._objective,
-            n_trials=self.n_trials,
-            show_progress_bar=True,
-        )
+        try:
+            study.optimize(
+                self._objective,
+                n_trials=self.n_trials,
+                show_progress_bar=True,
+            )
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user. Printing best results found so far...")
 
         print(f"\nBest macro-F1: {study.best_value:.4f}")
         print("Best params:")

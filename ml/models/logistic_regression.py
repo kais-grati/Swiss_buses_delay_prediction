@@ -1,3 +1,4 @@
+import joblib
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
@@ -32,3 +33,16 @@ class LogisticRegressionModel(ClassifierModel):
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         return self._model.predict_proba(X)
+
+    def save(self, path):
+        joblib.dump(self._model, str(path))
+
+    @classmethod
+    def load(cls, path, **init_kwargs):
+        model = cls(**init_kwargs)
+        model._model = joblib.load(str(path))
+        return model
+
+
+from ml.models.base import _register
+_register("LogisticRegressionModel", LogisticRegressionModel)

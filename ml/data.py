@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import Generator, List, Optional, Tuple
 import duckdb
 import pandas as pd
 import pyarrow.parquet as pq
@@ -33,6 +33,18 @@ class DataLoader:
         df = df.drop(columns=[c for c in self.drop_cols if c in df.columns])
         X = df.drop(columns=[self.target])
         y = df[self.target]
+        if self.test_size <= 0:
+            return None, X, None, y
         return train_test_split(
             X, y, test_size=self.test_size, random_state=self.random_state
         )
+
+    def stream(self) -> Generator[Tuple[pd.DataFrame, pd.Series], None, None]:
+        """Yield (X_chunk, y_chunk) by reading row groups one at a time."""
+        pf = pq.ParquetFile(self.path)
+        for i in range(pf.metadata.num_row_groups):
+            chunk = pf.read_row_group(i).to_pandas()
+            chunk = chunk.drop(columns=[c for c in self.drop_cols if c in chunk.columns])
+            X = chunk.drop(columns=[self.target])
+            y = chunk[self.target]
+            yield X, y

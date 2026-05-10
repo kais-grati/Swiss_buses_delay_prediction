@@ -52,3 +52,17 @@ class XGBoostModel(BaseModel):
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         return self._model.predict(X)
+
+    def save(self, path):
+        self._model.get_booster().save_model(f"{path}.ubj")
+
+    @classmethod
+    def load(cls, path, **init_kwargs):
+        model = cls(**init_kwargs)
+        model._model._Booster = xgb.Booster(model_file=f"{path}.ubj")
+        model._model._n_features_in = model._model._Booster.num_features()
+        return model
+
+
+from ml.models.base import _register
+_register("XGBoostModel", XGBoostModel)

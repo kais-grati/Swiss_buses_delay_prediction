@@ -366,6 +366,44 @@ python drop_pass_through.py
 Uses DuckDB streaming — the full file is never loaded into RAM. Writes to a
 `.tmp` file first, verifies the row count, then atomically replaces the original.
 
+### Utility: create a representative sample
+
+`sample_dataset.py` extracts a smaller representative subset from any parquet file
+without loading the full dataset into memory.
+
+Two sampling modes:
+
+**Reservoir** (default) — uniform random sample in a single pass via DuckDB.
+Works on files of any size with memory bounded by the sample size, not the input.
+
+**Stratified** (`--stratify-on COL`) — preserves the distribution of a column
+by sampling proportionally within quantile bins. Reads only the stratify column
+to compute bin edges, then uses a single `row_number() OVER (PARTITION BY stratum
+ORDER BY random())` query to pick the exact number of rows per stratum.
+
+```bash
+# 1M uniform random rows
+python sample_dataset.py data/dataset.parquet -o data/sample.parquet -n 1_000_000
+
+# 10% stratified — preserves arrival_delay_s distribution
+python sample_dataset.py data/dataset.parquet -o data/sample.parquet --frac 0.1 --stratify-on arrival_delay_s
+
+# Exact count with custom bins and seed
+python sample_dataset.py data/dataset.parquet -o data/sample.parquet -n 50000 --stratify-on arrival_delay_s --n-bins 20 --seed 123
+```
+
+| Flag | Description |
+|------|-------------|
+| `-o`, `--output` | Output parquet path (required) |
+| `-n`, `--rows` | Exact number of rows to sample |
+| `--frac` | Fraction of rows (e.g. `0.1` for 10%) |
+| `--stratify-on` | Column to stratify by (preserves its distribution) |
+| `--n-bins` | Quantile bins for stratification (default: 10) |
+| `--seed` | Random seed (default: 42) |
+
+Either `-n` or `--frac` is required (mutually exclusive). `-n` accepts
+underscores as thousands separators (e.g. `1_000_000`).
+
 ## Output Files
 
 | File | Size | Description |
@@ -687,3 +725,124 @@ clf_study = clf_optimizer.optimize()
 ```
 
 Optimizers cache the loaded dataset on first call (`_load_once`) and use TPE sampling. Best parameters are printed at the end and can be copy-pasted directly into an `Experiment` definition in `main.py`.
+
+---
+
+## Model Persistence (Save / Load)
+
+Every model and pipeline can be serialized to disk and reloaded for inference without retraining.
+
+### Per-model serialization
+
+`BaseModel` provides default `save()` / `load()` via `joblib`, but tree-based models override it with their native formats for speed and smaller files:
+
+| Model | Format | Method |
+|-------|--------|--------|
+| `LightGBMModel` | `booster_.save_model()` | Native LightGBM text/binary |
+| `LightGBMClassifierModel` | Directory: booster + `meta.json` | Native LightGBM + class metadata |
+| `XGBoostModel` | `.save_model()` | Native XGBoost UBJSON |
+| `XGBoostClassifierModel` | Directory: booster + `meta.json` | Native XGBoost + `n_classes_` |
+| `CatBoostModel` | `.save_model()` | Native CatBoost binary |
+| `CatBoostClassifierModel` | `.save_model()` | Native CatBoost binary |
+| `RidgeModel` | `joblib.dump()` | Implicit sklearn serialization |
+| `LogisticRegressionModel` | `joblib.dump()` | Implicit sklearn serialization |
+| `RandomForestClassifierModel` | `joblib.dump()` | Implicit sklearn serialization |
+| `OrdinalClassifierModel` | `joblib.dump()` | Wraps base model's format |
+| `StackingModel` | `joblib.dump()` | Serializes meta-model + base models |
+| `ClassificationStackingModel` | `joblib.dump()` | Serializes meta-model + base models |
+| `PipelinedClassifierModel` | `joblib.dump()` | Serializes inner classifier + preprocessors |
+
+On `load()`, tree models reconstruct only the sklearn wrapper around the pre-trained booster — the trees themselves are loaded verbatim from disk. For LightGBM and XGBoost sklearn wrappers, internal attributes (`_Booster`, `_n_features`, `_n_features_in`, `fitted_`, and for classifiers `_classes`, `_le`, `_class_map`) are re-injected so `.predict()` and `.predict_proba()` work identically to a freshly fitted model.
+
+### Model registry
+
+A decorator-based registry in `ml/models/base.py` maps class names to types so composite models (stacking, ordinal) can polymorphically deserialize their base models:
+
+```python
+from ml.models.base import _register, _lookup
+
+_register("LightGBMModel", LightGBMModel)          # called at import time
+cls = _lookup("LightGBMModel")                     # → LightGBMModel class
+```
+
+All 13 model classes register themselves at the bottom of their respective modules. The registry is populated when `ml.models` is imported (via `ml/models/__init__.py`).
+
+### Pipeline save/load
+
+`MLPipeline.save(path)` persists the entire pipeline — preprocessors + model — into a directory:
+
+```
+saved_models/LGBM-v1/
+  manifest.json           # {"model_type": "LightGBMClassifierModel", "n_preprocessors": 3}
+  preprocessor_0.joblib    # TemporalFeatureExtractor (fitted)
+  preprocessor_1.joblib    # FeatureScaler (fitted)
+  preprocessor_2.joblib    # WeatherRushHourPreprocessor (fitted)
+  model/                   # model-specific format
+```
+
+Preprocessors are serialized with `joblib` (all sklearn-compatible). The model is saved in its native format inside the `model/` subdirectory.
+
+`MLPipeline.load(path)` reads the manifest, deserializes preprocessors in order, dispatches model loading via the registry, and returns a ready-to-use pipeline:
+
+```python
+pipeline = MLPipeline.load("saved_models/LGBM-v1")
+y_pred = pipeline.predict(X)        # preprocessors transform() then model.predict()
+```
+
+### Training with save
+
+In `main.py`, each experiment appends a `model.save()` call after fitting:
+
+```python
+pipeline = experiment.run(pipeline_only=True)
+pipeline.save("saved_models/LGBM-v1")
+```
+
+---
+
+## Streaming Inference (`inference.py`)
+
+`inference.py` loads a saved pipeline and runs prediction on a parquet dataset using row-group-at-a-time streaming — the full dataset is never held in memory.
+
+### Why streaming
+
+Parquet files are organized into row groups (typically ~100K–1M rows each). `pq.ParquetFile.read_row_group(i)` reads one group at a time. The expensive wide feature DataFrame is discarded per chunk; only 1D prediction arrays accumulate.
+
+### Usage
+
+```bash
+# Evaluate on full dataset
+python inference.py -m saved_models/LGBM-v1 -d data/dataset_lausanne.parquet --ts
+
+# Inference only (no target column needed), save predictions
+python inference.py -m saved_models/LGBM-v1 -d data/dataset_lausanne.parquet --ts --no-eval -o predictions.parquet
+```
+
+**Arguments:**
+
+| Flag | Description |
+|------|-------------|
+| `-m`, `--model` | Path to saved model directory (required) |
+| `-d`, `--dataset` | Path to parquet dataset (required) |
+| `-t`, `--target` | Target column name (default: `arrival_delay_s`) |
+| `--ts` | Keep timestamp column (required if model uses `TemporalFeatureExtractor`) |
+| `--drop-cols` | Override columns to drop |
+| `--binner` | Delay binner for classification (default: `v1` = 90s binary split) |
+| `--no-eval` | Skip evaluation — prediction only |
+| `--no-class-names` | Use numeric labels in confusion matrix |
+| `-o`, `--output` | Save predictions to `.parquet` or `.csv` |
+
+### How it works
+
+`DataLoader.stream()` opens the parquet file with `ParquetFile`, iterates over row groups, and yields `(X_chunk, y_chunk)` tuples. `inference.py` loops over chunks, calls `pipeline.predict(X_chunk)` on each, and accumulates results:
+
+```
+Row group 0  →  predict()  →  y_pred₀
+Row group 1  →  predict()  →  y_pred₁
+...
+Row group N  →  predict()  →  y_predₙ
+
+np.concatenate([y_pred₀, y_pred₁, ..., y_predₙ])  →  final predictions
+```
+
+Target labels (if available) are accumulated the same way for evaluation. Peak memory is ~one row group + one preprocessor transform buffer — the 1D prediction arrays cost only ~8 bytes per row (e.g., 5M rows ≈ 40 MB).

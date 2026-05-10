@@ -6,13 +6,8 @@ class DelayBinner(ClassEncoder):
     """
     Converts continuous delay seconds into discrete classes.
 
-    Boundaries chosen from data exploration on dataset_705.parquet (n=502,890):
-      distribution peaks at 60-90s; <3% of rows exceed 300s, so coarse upper bins waste capacity.
-
-    Notes:
-        Balanced distribution bins: 10 60 100 160
     """
-    def __init__(self, bins=[90]):
+    def __init__(self, bins=[180]):
         self.bins = bins
 
     def encode(self, y: pd.Series) -> pd.Series:

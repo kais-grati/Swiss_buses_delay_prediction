@@ -91,3 +91,22 @@ class LightGBMModel(BaseModel):
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         return self._model.predict(X)
+
+    def save(self, path):
+        self._model.booster_.save_model(str(path))
+
+    @classmethod
+    def load(cls, path, **init_kwargs):
+        model = cls(**init_kwargs)
+        model._model._Booster = lgb.Booster(model_file=str(path))
+        n = model._model._Booster.num_feature()
+        model._model._n_features = n
+        model._model._n_features_in = n
+        model._model._objective = "regression"
+        model._model._n_classes = -1
+        model._model.fitted_ = True
+        return model
+
+
+from ml.models.base import _register
+_register("LightGBMModel", LightGBMModel)

@@ -1,7 +1,9 @@
 import copy
+import json
+from pathlib import Path
 import numpy as np
 import pandas as pd
-from ml.models.base import ClassifierModel
+from ml.models.base import ClassifierModel, _lookup
 
 
 class OrdinalClassifierModel(ClassifierModel):
@@ -64,3 +66,34 @@ class OrdinalClassifierModel(ClassifierModel):
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         return np.array(self._classes)[np.argmax(self.predict_proba(X), axis=1)]
+
+    def save(self, path):
+        root = Path(path)
+        root.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "type": "OrdinalClassifierModel",
+            "classes": [int(c) for c in self._classes],
+            "base_model_type": type(self._base_model).__name__,
+            "n_classifiers": len(self._classifiers),
+        }
+        for i, clf in enumerate(self._classifiers):
+            clf.save(root / f"classifier_{i}")
+        (root / "manifest.json").write_text(json.dumps(manifest, indent=2))
+
+    @classmethod
+    def load(cls, path):
+        root = Path(path)
+        manifest = json.loads((root / "manifest.json").read_text())
+        # Reconstitute a fresh template (unfit) to satisfy __init__
+        base_template = _lookup(manifest["base_model_type"])()
+        instance = cls(base_model=base_template)
+        instance._classes = manifest["classes"]
+        instance._classifiers = [
+            _lookup(manifest["base_model_type"]).load(root / f"classifier_{i}")
+            for i in range(manifest["n_classifiers"])
+        ]
+        return instance
+
+
+from ml.models.base import _register
+_register("OrdinalClassifierModel", OrdinalClassifierModel)

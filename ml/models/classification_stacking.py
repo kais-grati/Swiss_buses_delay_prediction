@@ -1,9 +1,12 @@
 import copy
+import json
+import joblib
+from pathlib import Path
 from typing import List
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import StratifiedKFold
-from ml.models.base import ClassifierModel
+from ml.models.base import ClassifierModel, _MODEL_REGISTRY, _lookup
 
 
 class ClassificationStackingModel(ClassifierModel):
@@ -53,3 +56,48 @@ class ClassificationStackingModel(ClassifierModel):
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         return self._meta_model.predict_proba(self._meta_features(X))
+
+    def save(self, path):
+        root = Path(path)
+        root.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "type": "ClassificationStackingModel",
+            "n_folds": self._n_folds,
+            "n_classes": self._n_classes,
+            "base_models": [],
+            "meta_model": None,
+        }
+        for i, m in enumerate(self._base_models):
+            sub = root / f"base_{i}"
+            sub.mkdir(exist_ok=True)
+            m.save(sub / "model")
+            manifest["base_models"].append(type(m).__name__)
+        meta_type = type(self._meta_model).__name__
+        if meta_type in _MODEL_REGISTRY:
+            self._meta_model.save(root / "meta")
+        else:
+            joblib.dump(self._meta_model, root / "meta.joblib")
+        manifest["meta_model"] = meta_type
+        (root / "manifest.json").write_text(json.dumps(manifest, indent=2))
+
+    @classmethod
+    def load(cls, path):
+        root = Path(path)
+        manifest = json.loads((root / "manifest.json").read_text())
+        base_models = [
+            _lookup(name).load(root / f"base_{i}" / "model")
+            for i, name in enumerate(manifest["base_models"])
+        ]
+        meta_name = manifest["meta_model"]
+        if meta_name in _MODEL_REGISTRY:
+            meta_model = _lookup(meta_name).load(root / "meta")
+        else:
+            meta_model = joblib.load(root / "meta.joblib")
+        instance = cls(base_models=base_models, meta_model=meta_model,
+                       n_folds=manifest.get("n_folds", 5))
+        instance._n_classes = manifest.get("n_classes")
+        return instance
+
+
+from ml.models.base import _register
+_register("ClassificationStackingModel", ClassificationStackingModel)

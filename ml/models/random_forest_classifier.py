@@ -1,3 +1,4 @@
+import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
@@ -14,7 +15,7 @@ class RandomForestClassifierModel(ClassifierModel):
         min_samples_leaf: int = 1,
         max_features: str | float = "sqrt",
         bootstrap: bool = True,
-        class_weight: str | None = "balanced",
+        class_weight: str | None = "balanced_subsample",
         early_stopping_rounds: int = 0,
         val_fraction: float = 0.1,
         random_state: int = 42,
@@ -80,3 +81,16 @@ class RandomForestClassifierModel(ClassifierModel):
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         return self._model.predict_proba(X)
+
+    def save(self, path):
+        joblib.dump(self._model, str(path))
+
+    @classmethod
+    def load(cls, path, **init_kwargs):
+        model = cls(**init_kwargs)
+        model._model = joblib.load(str(path))
+        return model
+
+
+from ml.models.base import _register
+_register("RandomForestClassifierModel", RandomForestClassifierModel)

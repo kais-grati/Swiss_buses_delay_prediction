@@ -2,18 +2,18 @@ import os
 import duckdb
 
 MUNICIPALITIES = [
-    "Bussigny",
+    # "Bussigny",
     "Chavannes-près-Renens",
     "Crissier",
     "Ecublens (VD)",
-    "Prilly",
+    # "Prilly",
     "Renens (VD)",
     "Saint-Sulpice (VD)",
-    "Villars-Sainte-Croix",
-    "Lausanne",
+    # "Villars-Sainte-Croix",
+    # "Lausanne",
 ]
 
-OUTPUT = "data/dataset_lausanne.parquet"
+OUTPUT = "data/dataset_lausanne_small.parquet"
 SOURCE = "data/dataset_with_weather.parquet"
 STATIONS = "data/station_data.parquet"
 

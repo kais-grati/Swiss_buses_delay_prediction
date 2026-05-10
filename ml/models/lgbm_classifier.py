@@ -1,7 +1,10 @@
+import json
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
 from ml.models.base import ClassifierModel
 
 
@@ -26,6 +29,7 @@ class LightGBMClassifierModel(ClassifierModel):
         class_weight: str | None = "balanced",
         early_stopping_rounds: int = 50,
         val_fraction: float = 0.1,
+        scale_pos_weight: float = 1,
         log_every: int = 0,
     ):
         self._early_stopping_rounds = early_stopping_rounds
@@ -50,6 +54,7 @@ class LightGBMClassifierModel(ClassifierModel):
             class_weight=class_weight,
             n_jobs=-1,
             verbose=-1,
+            scale_pos_weight=scale_pos_weight
         )
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "LightGBMClassifierModel":
@@ -76,3 +81,38 @@ class LightGBMClassifierModel(ClassifierModel):
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         return self._model.predict_proba(X)
+
+    def save(self, path):
+        root = Path(path)
+        root.mkdir(parents=True, exist_ok=True)
+        self._model.booster_.save_model(str(root / "booster.lgbm"))
+        meta = {
+            "classes": [int(c) for c in self._model._classes],
+            "objective": self._model._objective,
+            "n_classes": self._model._n_classes,
+        }
+        (root / "meta.json").write_text(json.dumps(meta))
+
+    @classmethod
+    def load(cls, path, **init_kwargs):
+        root = Path(path)
+        meta = json.loads((root / "meta.json").read_text())
+        model = cls(**init_kwargs)
+        model._model._Booster = lgb.Booster(model_file=str(root / "booster.lgbm"))
+        n = model._model._Booster.num_feature()
+        model._model._n_features = n
+        model._model._n_features_in = n
+        model._model._n_classes = meta["n_classes"]
+        model._model._objective = meta["objective"]
+        classes = np.array(meta["classes"])
+        model._model._classes = classes
+        model._model._class_map = {c: i for i, c in enumerate(classes)}
+        le = LabelEncoder()
+        le.classes_ = classes
+        model._model._le = le
+        model._model.fitted_ = True
+        return model
+
+
+from ml.models.base import _register
+_register("LightGBMClassifierModel", LightGBMClassifierModel)

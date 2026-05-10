@@ -57,3 +57,16 @@ class CatBoostClassifierModel(ClassifierModel):
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         return self._model.predict_proba(X)
+
+    def save(self, path):
+        self._model.save_model(str(path))
+
+    @classmethod
+    def load(cls, path, **init_kwargs):
+        model = cls(**init_kwargs)
+        model._model.load_model(str(path))
+        return model
+
+
+from ml.models.base import _register
+_register("CatBoostClassifierModel", CatBoostClassifierModel)

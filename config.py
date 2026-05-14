@@ -10,7 +10,7 @@ console = Console()
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-DATASET = "data/dataset_lausanne_50k.parquet"
+DATASET = "data/705.parquet"
 TARGET  = "arrival_delay_s"
 
 DROP_COLS = [
@@ -37,6 +37,12 @@ NUMERIC_COLS_LOGREG_FULL = NUMERIC_COLS + TEMPORAL_COLS + ["wind_chill", "hist_m
 # Enhanced set for tree models (trees don't need temporal scaling but benefit from engineered features)
 NUMERIC_COLS_ENHANCED = NUMERIC_COLS + ["wind_chill"]
 
+# Lag delay feature (precomputed by build_dataset.py, no runtime LagDelayEncoder needed)
+LAG_COLS = ["prev_stop_delay"]
+
+# Full numeric set with lag features
+NUMERIC_COLS_LAG = NUMERIC_COLS + ["prev_stop_delay"]
+
 # Scaled numeric set for logistic regression after WindMerger + TemporalFeatureExtractor
 LOGREG_NUMERIC = [
     "temperature", "precipitation", "sunshine", "humidity",
@@ -47,6 +53,7 @@ LOGREG_NUMERIC = [
 
 loader = DataLoader(path=DATASET, target=TARGET, drop_cols=DROP_COLS)
 loader_enhanced = DataLoader(path=DATASET, target=TARGET, drop_cols=DROP_COLS_KEEP_TS)
+loader_lag = DataLoader(path=DATASET, target=TARGET, drop_cols=["stop_name", "departure_delay_s", "trip_id"])
 evaluator = Evaluator()
 binner = DelayBinner()
 logger = ExperimentLogger()

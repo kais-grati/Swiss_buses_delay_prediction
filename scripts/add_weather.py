@@ -115,7 +115,7 @@ def join_weather() -> None:
     """Joins dataset with weather via a single DuckDB query."""
     log.info("Joining with DuckDB (single pass, multi-threaded)...")
 
-    threads = min(cpu_count(), 8)
+    threads = 2
     tmp     = DATASET_OUT.with_suffix(".tmp.parquet")
 
     weather_cols_sql = ",\n                ".join(
@@ -138,6 +138,7 @@ def join_weather() -> None:
                 d.stop_id,   d.stop_name,
                 d.additional_trip,
                 d.arrival_delay_s, d.departure_delay_s,
+                d.trip_id,
                 {weather_cols_sql},
                 COALESCE(h.is_public_holiday, FALSE) AS is_public_holiday
             FROM read_parquet('{DATASET_IN}') AS d

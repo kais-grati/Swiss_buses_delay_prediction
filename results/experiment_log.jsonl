@@ -199,3 +199,10 @@
 {"timestamp": "2026-05-10T15:30:26", "name": "Ordinal-RF", "kind": "classification", "macro_f1": 0.6303, "f1_class_0": 0.8532, "f1_class_1": 0.4075}
 {"timestamp": "2026-05-10T15:40:00", "name": "Ordinal-XGBoost", "kind": "classification", "macro_f1": 0.6291, "f1_class_0": 0.822, "f1_class_1": 0.4363}
 {"timestamp": "2026-05-10T15:52:32", "name": "Ordinal-XGBoost", "kind": "classification", "macro_f1": 0.6523, "f1_class_0": 0.8654, "f1_class_1": 0.4392}
+{"timestamp": "2026-05-11T11:31:22", "name": "Ordinal-XGBoost", "kind": "classification", "macro_f1": 0.6523, "f1_class_0": 0.8654, "f1_class_1": 0.4392}
+{"timestamp": "2026-05-11T11:46:29", "name": "MLP", "kind": "classification", "macro_f1": 0.446, "f1_class_0": 0.8919, "f1_class_1": 0.0}
+{"timestamp": "2026-05-11T11:50:57", "name": "MLP", "kind": "classification", "macro_f1": 0.446, "f1_class_0": 0.8919, "f1_class_1": 0.0}
+{"timestamp": "2026-05-11T12:01:08", "name": "MLP", "kind": "classification", "macro_f1": 0.446, "f1_class_0": 0.8919, "f1_class_1": 0.0}
+{"timestamp": "2026-05-11T14:14:16", "name": "MLP-Lag", "kind": "classification", "macro_f1": 0.446, "f1_class_0": 0.8919, "f1_class_1": 0.0}
+{"timestamp": "2026-05-14T10:00:28", "name": "LGBM-Lag", "kind": "classification", "macro_f1": 0.8689, "f1_class_0": 0.9629, "f1_class_1": 0.7748}
+{"timestamp": "2026-05-14T10:01:07", "name": "LGBM-Lag", "kind": "classification", "macro_f1": 0.8656, "f1_class_0": 0.9621, "f1_class_1": 0.7691}

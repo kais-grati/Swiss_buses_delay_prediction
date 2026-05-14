@@ -1,32 +1,28 @@
+"""
+Drop rows with missing prev_stop_delay from dataset_with_weather.parquet.
+
+Streams row groups to avoid loading the 8.5 GB file into memory.
+"""
+
 import os
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.parquet as pq
-
-WEATHER_COLS = [
-    "temperature", "precipitation", "sunshine", "humidity",
-    "wind_speed", "wind_gust", "wind_dir", "pressure", "snow_depth",
-]
 
 SRC = "data/dataset_with_weather.parquet"
 TMP = "data/dataset_with_weather.parquet.tmp"
 
-print("Dropping rows with any missing weather field...")
+print("Dropping rows with missing prev_stop_delay...")
 
 pf = pq.ParquetFile(SRC)
 total_before = pf.metadata.num_rows
-total_after = 0
 total_seen = 0
+total_after = 0
 
 writer = None
 try:
     for batch in pf.iter_batches():
         table = pa.Table.from_batches([batch])
-        masks = [table[col].is_valid() for col in WEATHER_COLS]
-        mask = masks[0]
-        for m in masks[1:]:
-            mask = pc.and_(mask, m)
-        filtered = table.filter(mask)
+        filtered = table.filter(table["prev_stop_delay"].is_valid())
         total_seen += len(table)
         total_after += len(filtered)
         if writer is None:
@@ -41,5 +37,5 @@ finally:
 os.replace(TMP, SRC)
 
 dropped = total_before - total_after
-print(f"Dropped {dropped:,} rows ({dropped * 100 / total_before:.3f}%)")
+print(f"Dropped {dropped:,} rows ({dropped * 100 / total_before:.2f}%)")
 print(f"Remaining: {total_after:,} rows")

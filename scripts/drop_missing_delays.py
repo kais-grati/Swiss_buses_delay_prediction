@@ -3,15 +3,12 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-WEATHER_COLS = [
-    "temperature", "precipitation", "sunshine", "humidity",
-    "wind_speed", "wind_gust", "wind_dir", "pressure", "snow_depth",
-]
+DELAY_COLS = ["arrival_delay_s", "departure_delay_s"]
 
 SRC = "data/dataset_with_weather.parquet"
 TMP = "data/dataset_with_weather.parquet.tmp"
 
-print("Dropping rows with any missing weather field...")
+print("Dropping rows with missing arrival or departure delay...")
 
 pf = pq.ParquetFile(SRC)
 total_before = pf.metadata.num_rows
@@ -22,7 +19,7 @@ writer = None
 try:
     for batch in pf.iter_batches():
         table = pa.Table.from_batches([batch])
-        masks = [table[col].is_valid() for col in WEATHER_COLS]
+        masks = [table[col].is_valid() for col in DELAY_COLS]
         mask = masks[0]
         for m in masks[1:]:
             mask = pc.and_(mask, m)

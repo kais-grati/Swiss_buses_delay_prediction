@@ -46,6 +46,7 @@ EXPECTED_SCHEMA = pa.schema([
     ("pass_through",     pa.bool_()),
     ("arrival_delay_s",  pa.int32()),
     ("departure_delay_s",pa.int32()),
+    ("trip_id",          pa.large_string()),
 ])
 
 
@@ -140,6 +141,7 @@ def process_file(filename):
             "pass_through":      coerce_bool(df["PASS_THROUGH"]),
             "arrival_delay_s":   arrival_delay_s.astype("Int32"),
             "departure_delay_s": departure_delay_s.astype("Int32"),
+            "trip_id":           df["TRIP_ID"],
         })
 
         out_table = pa.Table.from_pandas(result, schema=EXPECTED_SCHEMA, preserve_index=False)

@@ -8,20 +8,15 @@ CSV files to the final `dataset_with_weather.parquet` used for model training.
 ## Overview
 
 ```
-data/*.csv  (raw, German headers, all transport modes)
+data/compressed_data/*.zip  (12 monthly ZIP archives, daily CSVs with German headers)
     │
-    ├─ 1. translate_headers.py   → rename German columns to English
-    ├─ 2. keep_only_buses.py     → filter to bus rows only  →  cleaned_data/*.csv
-    ├─ 3. prepare_features.py    → drop unused columns      →  cleaned_data/*.csv (in-place)
-    ├─ 4. to_parquet.py          → feature engineering      →  dataset.parquet
+    ├─ 1. build_dataset.py       → translate, filter, features, holidays  →  dataset.parquet
     │
-    ├─ 5. fetch_weather_hourly.py→ hourly Open-Meteo weather→  weather_hourly.parquet
+    ├─ 2. fetch_weather_hourly.py→ hourly Open-Meteo weather→  weather_hourly.parquet
     │                                                           station_metadata.parquet
-    ├─ 6. add_weather.py         → join weather to dataset  →  dataset_with_weather.parquet
-    ├─ 7. add_holidays.py        → add is_public_holiday    →  dataset_with_weather.parquet (in-place)
-    ├─ 8. drop_outlier_delays.py → remove delay > 30 min   →  dataset_with_weather.parquet (in-place)
-    ├─ 9. drop_early_outliers.py  → remove delay < -2 min  →  dataset_with_weather.parquet (in-place)
-    └─10. drop_missing_weather.py → remove missing weather →  dataset_with_weather.parquet (in-place)
+    ├─ 3. add_weather.py         → join weather to dataset  →  dataset_with_weather.parquet
+    ├─ 4. drop_missing_weather.py → remove missing weather →  dataset_with_weather.parquet (in-place)
+    └─ 5. add_lag_delay.py        → precompute lag feature  →  dataset_with_weather.parquet (in-place)
 ```
 
 ---
@@ -37,103 +32,63 @@ data/*.csv  (raw, German headers, all transport modes)
 
 ---
 
-## Step 1 — Translate Headers
+## Step 1 — Build Dataset
 
-**Script:** `translate_headers.py`  
-**Input:** `data/*.csv` (365 daily files, German column names)  
-**Output:** same files, header rewritten in English  
-**Reads into memory:** one file at a time
+**Script:** `build_dataset.py`  
+**Input:** `data/compressed_data/*.zip` (12 monthly ZIP archives, each containing ~31 daily CSVs with German headers)  
+**Output:** `data/dataset.parquet` (~3.5 GB, snappy-compressed)
 
-Renames German SBB column names to English equivalents, e.g.:
-- `BETRIEBSTAG` → `DATE`
-- `HALTESTELLEN_NAME` → `STOP_NAME`
-- `AN_PROGNOSE` → `ARRIVAL_FORECAST`
+This single script replaces the old 7-step pipeline (`translate_headers.py` →
+`keep_only_buses.py` → `prepare_features.py` → `to_parquet.py` →
+`add_holidays.py` → `drop_outlier_delays.py` → `drop_early_outliers.py`).
+It reads daily CSVs directly from ZIP archives (no disk extraction), processes
+them in parallel, and writes the final parquet in one shot.
 
-Run:
-```bash
-python translate_headers.py
-```
+For each daily CSV the script:
 
----
-
-## Step 2 — Keep Only Buses
-
-**Script:** `keep_only_buses.py`  
-**Input:** `data/*.csv`  
-**Output:** `cleaned_data/*.csv` (new files, bus rows only)
-
-Filters each daily CSV to rows where `PRODUCT_ID == "Bus"`, discarding trains,
-trams, boats, etc. Processes files in parallel with all available CPU cores.
-
-Run:
-```bash
-python keep_only_buses.py
-```
-
----
-
-## Step 3 — Drop Unused Columns
-
-**Script:** `prepare_features.py`  
-**Input:** `cleaned_data/*.csv`  
-**Output:** same files, rewritten in-place with only the needed columns
-
-Keeps only these 14 columns, dropping everything else:
-
-| Column | Description |
-|--------|-------------|
-| `DATE` | Service date (DD.MM.YYYY) |
-| `OPERATOR_ABB` | Operator abbreviation |
-| `LINE_NAME` | Line identifier |
-| `BPUIC` | Stop identifier (numeric) |
-| `STOP_NAME` | Stop name |
-| `ARRIVAL_TIME` | Scheduled arrival (DD.MM.YYYY HH:MM) |
-| `ARRIVAL_FORECAST` | Actual arrival (DD.MM.YYYY HH:MM:SS) |
-| `ARRIVAL_FORECAST_STATUS` | `REAL` / `GESCHAETZT` / etc. |
-| `DEPARTURE_TIME` | Scheduled departure |
-| `DEPARTURE_FORECAST` | Actual departure |
-| `DEPARTURE_FORECAST_STATUS` | `REAL` / `GESCHAETZT` / etc. |
-| `ADDITIONAL_TRIP` | Extra unscheduled trip flag |
-| `CANCELLED` | Trip cancelled flag |
-| `PASS_THROUGH` | Bus passed without stopping |
-
-Skips files already processed (idempotent). Writes atomically via `.tmp` files.
-
-Run:
-```bash
-python prepare_features.py
-```
-
----
-
-## Step 4 — Feature Engineering → dataset.parquet
-
-**Script:** `to_parquet.py`  
-**Input:** `cleaned_data/*.csv`  
-**Output:** `dataset.parquet` (~3.5 GB, snappy-compressed)
-
-This is the main processing step. For each daily CSV:
-
-1. **Drop cancelled trips** (`CANCELLED == true`)
-2. **Keep only REAL observations** — rows where at least one of
+1. **Reads from ZIP** — raw bytes loaded into memory via `pyarrow.BufferReader`,
+   parsed with PyArrow's CSV reader (11× faster than pandas)
+2. **Translates headers** — 21 German column names mapped to English
+3. **Filters to buses** — `PRODUCT_ID == "Bus"` (discards trains, trams, boats)
+4. **Keeps 15 columns** — drops irrelevant columns immediately to save RAM
+5. **Drops cancelled, pass-through, and additional trips** — `CANCELLED == true`,
+   `PASS_THROUGH == true`, `ADDITIONAL_TRIP == true`
+6. **Keeps only REAL observations** — rows where at least one of
    `ARRIVAL_FORECAST_STATUS` or `DEPARTURE_FORECAST_STATUS` is `"REAL"`.
    Estimated (`GESCHAETZT`) forecasts are excluded.
-3. **Compute delays** — `(actual_time − scheduled_time)` in seconds, using
+7. **Computes delays** — `(actual_time − scheduled_time)` in seconds, using
    time-of-day only to avoid ±24h errors from date mismatches. Wrapped to
    (−12h, +12h].
-4. **Encode cyclical time features:**
-   - `time_sin / time_cos` — minute of day mapped onto unit circle
-   - `dow_sin / dow_cos` — day of week (0=Mon … 6=Sun)
-   - `month_sin / month_cos` — month (1–12)
-   - `is_weekend` — bool
-5. **Preserve raw timestamp** — scheduled arrival (falling back to scheduled
-   departure) kept as `timestamp` for weather joining.
+8. **Drops outlier delays** — rows where `arrival_delay_s ∉ [-120, 1800]` or
+   `departure_delay_s ∉ [-120, 1800]`. Early departures < 2 min are impossible
+   under Swiss regulations (~0.6% of rows). Delays > 30 min are likely data
+   corruption (~15.6% of rows).
+9. **Adds public holiday flag** — maps each `stop_id` to its canton via
+   `station_data.parquet`, then checks against canton-specific Swiss public
+   holidays for 2025. Sets `is_public_holiday = TRUE` for stops in a canton
+   on a holiday date.
+10. **Encodes cyclical time features:**
+    - `time_sin / time_cos` — minute of day mapped onto unit circle
+    - `dow_sin / dow_cos` — day of week (0=Mon … 6=Sun)
+    - `month_sin / month_cos` — month (1–12)
+    - `is_weekend` — bool
+11. **Preserves raw timestamp** — scheduled arrival (falling back to scheduled
+    departure) kept as `timestamp` for weather joining.
 
-Output schema:
+Per-file parquets are written to `data/build_dataset_tmp/`, then merged into
+`dataset.parquet` with an atomic rename (no corrupt output on crash).
+
+**RAM:** one CSV in memory per worker at a time (~50–200 MB raw, ~10–30 MB
+after filtering). DataFrame freed immediately after writing.
+
+**Resume:** skips CSVs whose temp parquet already exists — safe to interrupt
+and restart.
+
+**Output schema:**
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `timestamp` | timestamp[s] | Scheduled arrival/departure (Swiss local, naive) |
+| `timestamp` | timestamp[ms] | Scheduled arrival/departure (Swiss local, naive) |
 | `time_sin` / `time_cos` | float32 | Cyclical time of day |
 | `dow_sin` / `dow_cos` | float32 | Cyclical day of week |
 | `month_sin` / `month_cos` | float32 | Cyclical month |
@@ -142,24 +97,24 @@ Output schema:
 | `line` | string | Line name |
 | `stop_id` | int32 | BPUIC stop number |
 | `stop_name` | string | Stop name |
-| `additional_trip` | bool | Unscheduled extra trip |
-| `pass_through` | bool | No stop made (filtered out in Step 6) |
-| `arrival_delay_s` | int32 | Arrival delay in seconds (nullable) |
-| `departure_delay_s` | int32 | Departure delay in seconds (nullable) |
-
-Processes files in parallel, writes per-file parquets to `cleaned_data_parquet_tmp/`,
-then merges into `dataset.parquet`. Supports resume (skips already-converted files).
+| `additional_trip` | bool | Unscheduled extra trip (filtered out in Step 1) |
+| `pass_through` | bool | No stop made (filtered out in Step 1) |
+| `arrival_delay_s` | int32 | Arrival delay in seconds (nullable, within [-120, 1800]) |
+| `departure_delay_s` | int32 | Departure delay in seconds (nullable, within [-120, 1800]) |
+| `is_public_holiday` | bool | Stop is in a canton on a Swiss public holiday |
+| `trip_id` | string | Trip identifier (for lag feature computation) |
+| `prev_stop_delay` | int32 | Delay at previous stop within same trip (nullable — first stop of each trip is NaN) |
 
 Run:
 ```bash
-python to_parquet.py --workers 4
-# or test on 3 files first:
-python to_parquet.py --test
+python build_dataset.py --workers 4
+# or test on the first CSV:
+python build_dataset.py --test
 ```
 
 ---
 
-## Step 5 — Hourly Open-Meteo Weather
+## Step 2 — Hourly Open-Meteo Weather
 
 **Script:** `fetch_weather_hourly.py`  
 **Input:** Open-Meteo Archive API, MeteoSwiss STAC API (station discovery)  
@@ -196,7 +151,7 @@ python fetch_weather_hourly.py
 
 ---
 
-## Step 6 — Join Weather → dataset_with_weather.parquet
+## Step 3 — Join Weather → dataset_with_weather.parquet
 
 **Script:** `add_weather.py`  
 **Input:** `dataset.parquet`, `weather_hourly.parquet`, `station_data.parquet`, `station_metadata.parquet`  
@@ -204,28 +159,26 @@ python fetch_weather_hourly.py
 
 Three sub-steps:
 
-**6a. Stop → nearest MeteoSwiss station mapping**
+**3a. Stop → nearest MeteoSwiss station mapping**
 
 Loads all 28,982 bus stop coordinates from `station_data.parquet` (Swiss LV95
 grid, EPSG:2056), converts them to WGS84 (lat/lon) using `pyproj`, then uses
 a `scipy` KDTree to find the nearest of the 158 MeteoSwiss stations for each
 stop. Result: a `{bpuic → station_id}` dictionary held in memory.
 
-**6b. Weather lookup table**
+**3b. Weather lookup table**
 
 Loads `weather_hourly.parquet` (~80 MB) fully into RAM, indexed by
 `(station_id, timestamp)` where timestamp is UTC-naive, floored to the hour.
 
-**6c. Filtered join**
+**3c. Filtered join**
 
 Reads `dataset.parquet` via DuckDB streaming:
-1. **Excludes pass-through rows** (`WHERE NOT pass_through`) — stops where the
-   bus never opens its doors have no meaningful delay to predict.
-2. **Drops the `pass_through` column** from the output (all remaining rows are
-   `pass_through = FALSE`).
-3. Maps `stop_id` → `meteoswiss_station_id` via the dictionary from 6a.
-4. Converts `timestamp` from Swiss local time (`Europe/Zurich`) to UTC, floors to hour.
-5. Left-joins with the weather table on `(station_id, utc_hour)`.
+1. **Drops the `pass_through` column** — all rows are already `pass_through = FALSE`
+   (filtered in Step 1), so the column carries no signal.
+2. Maps `stop_id` → `meteoswiss_station_id` via the dictionary from 3a.
+3. Converts `timestamp` from Swiss local time (`Europe/Zurich`) to UTC, floors to hour.
+4. Left-joins with the weather table on `(station_id, utc_hour)`.
 
 Adds these columns to the dataset (all float32):
 `temperature`, `precipitation`, `sunshine`, `humidity`,
@@ -239,63 +192,7 @@ python add_weather.py
 
 ---
 
-## Step 7 — Add Public Holidays → dataset_with_weather.parquet
-
-**Script:** `add_holidays.py`  
-**Input:** `dataset_with_weather.parquet`, `station_data.parquet`  
-**Output:** `dataset_with_weather.parquet` (in-place, adds `is_public_holiday` column)
-
-Three sub-steps:
-
-1. **Stop → canton mapping** — loads `station_data.parquet`, maps each `stop_id` (BPUIC) to its Swiss canton abbreviation (e.g. `VD`, `ZH`). Writes a temporary `_stop_map_tmp.parquet`.
-2. **Holiday table** — uses the `holidays` library to generate all canton-specific Swiss public holidays for each year present in the dataset. Writes `_holidays_tmp.parquet`.
-3. **Join** — DuckDB streaming join: `dataset ⟕ stop_map ⟕ holidays` on `(stop_id → canton, DATE(timestamp) = holiday_date)`. Sets `is_public_holiday = TRUE` for matching rows, `FALSE` otherwise. Verifies row count before atomically replacing the original file.
-
-Temporary files are cleaned up on exit (even on failure).
-
-Run:
-```bash
-pip install holidays   # first time only
-python add_holidays.py
-```
-
----
-
-## Step 8 — Drop Outlier Delays → dataset_with_weather.parquet
-
-**Script:** `drop_outlier_delays.py`  
-**Input:** `dataset_with_weather.parquet`  
-**Output:** `dataset_with_weather.parquet` (in-place, outlier rows removed)
-
-Drops rows where `arrival_delay_s > 1800` **or** `departure_delay_s > 1800` (30-minute threshold). These represent ~15.6% of the dataset and are likely corrupt records rather than real delays.
-
-Processes the file one PyArrow row group at a time — RAM usage stays bounded regardless of file size. Writes to `.tmp`, then atomically replaces the original.
-
-Run:
-```bash
-python drop_outlier_delays.py
-```
-
----
-
-## Step 9 — Drop Implausibly Early Arrivals → dataset_with_weather.parquet
-
-**Script:** `drop_early_outliers.py`  
-**Input:** `dataset_with_weather.parquet`  
-**Output:** `dataset_with_weather.parquet` (in-place, early outlier rows removed)
-
-Drops rows where `arrival_delay_s < -120` **or** `departure_delay_s < -120` (2-minute early threshold). Swiss transit regulations prohibit early departures, so values beyond -120s are data artifacts rather than real early arrivals (~0.60% of rows). Dropping is preferred over capping to avoid creating an artificial spike at -120s in the delay distribution.
-
-Same row-group streaming approach as Step 8.
-
-Run:
-```bash
-python drop_early_outliers.py
-```
-
----
-
-## Step 10 — Drop Missing Weather → dataset_with_weather.parquet
+## Step 4 — Drop Missing Weather → dataset_with_weather.parquet
 
 **Script:** `drop_missing_weather.py`  
 **Input:** `dataset_with_weather.parquet`  
@@ -312,34 +209,45 @@ python drop_missing_weather.py
 
 ---
 
+## Step 5 — Add Lag Delay Feature
+
+**Script:** `add_lag_delay.py`  
+**Input:** `dataset_with_weather.parquet` (or any dataset with `trip_id` + `timestamp` + `arrival_delay_s`)  
+**Output:** `dataset_with_weather.parquet` (in-place, `prev_stop_delay` column added)
+
+Computes `prev_stop_delay = LAG(arrival_delay_s, 1) OVER (PARTITION BY CAST(timestamp AS DATE), trip_id ORDER BY timestamp)` using DuckDB's streaming window operator. Each partition is a single trip on a single day (~20–30 rows), so memory is bounded regardless of dataset size.
+
+The first stop of each trip gets `NULL`. The `LagDelayEncoder` preprocessor fills these with the training median delay at ML time — no need to pick a fill value at the data level.
+
+This step is optional but recommended: precomputing `prev_stop_delay` lets `LagDelayEncoder` take its fast path (O(1) fillna), avoiding the O(n) groupby that would otherwise run on the full in-memory DataFrame during training.
+
+Run:
+```bash
+python add_lag_delay.py
+# or on a specific file:
+python add_lag_delay.py --path data/dataset.parquet
+```
+
+---
+
 ## Full Run Order
 
 ```bash
-# 1–3: one-time data cleaning (already done if cleaned_data/ exists)
-python translate_headers.py
-python keep_only_buses.py
-python prepare_features.py
+# 1: build dataset directly from ZIP archives (translate, filter, features,
+#    outlier removal, holidays — all in one step, resume-safe)
+python build_dataset.py --workers 4
 
-# 4: build dataset (re-run if to_parquet.py was modified)
-python to_parquet.py --workers 4
-
-# 5: fetch hourly weather (run once, resume-safe)
+# 2: fetch hourly weather (run once, resume-safe)
 python fetch_weather_hourly.py
 
-# 6: join everything (pass-through rows excluded automatically)
+# 3: join weather to dataset (pass-through rows already filtered out in step 1)
 python add_weather.py
 
-# 7: add canton-aware public holiday flag
-python add_holidays.py
-
-# 8: drop outlier delays (> 30 min)
-python drop_outlier_delays.py
-
-# 9: drop implausibly early arrivals/departures (< -2 min — ~0.60% of rows)
-python drop_early_outliers.py
-
-# 10: drop rows with any missing weather field (~0.47% of rows)
+# 4: drop rows with any missing weather field (~0.47% of rows)
 python drop_missing_weather.py
+
+# 5: precompute prev_stop_delay (lag feature) so ML training doesn't OOM
+python add_lag_delay.py
 ```
 
 ### Utility: create a line/stop sub-dataset
@@ -353,18 +261,6 @@ python filter_705_echandens.py
 ```
 
 Uses DuckDB predicate pushdown — scans only relevant row groups.
-
-### Utility: clean an existing dataset_with_weather.parquet
-
-If `dataset_with_weather.parquet` was generated before the pass-through filter
-was added to `add_weather.py`, run this once to remove those rows in-place:
-
-```bash
-python drop_pass_through.py
-```
-
-Uses DuckDB streaming — the full file is never loaded into RAM. Writes to a
-`.tmp` file first, verifies the row count, then atomically replaces the original.
 
 ### Utility: create a representative sample
 
@@ -448,6 +344,7 @@ ml/
     scaler.py                     # FeatureScaler (StandardScaler on selected cols)
     temporal.py                   # TemporalFeatureExtractor (hour, dow from timestamp)
     target_encoder.py             # HistoricalMeanEncoder (lag feature by group)
+    lag_delay.py                  # LagDelayEncoder (prev_stop_delay within trip)
     weather_engineer.py           # WeatherFeatureEngineer (wind chill, adverse flag)
     weather_rush_hour.py          # WeatherRushHourPreprocessor
     wind_encoder.py               # WindDirectionEncoder (wind_dir → sin/cos)
@@ -471,6 +368,7 @@ ml/
     ordinal_classifier.py         # OrdinalClassifierModel (Frank & Hall K-1 binary decomposition)
     classification_stacking.py    # ClassificationStackingModel (probability OOF stacking)
     pipelined_classifier.py       # PipelinedClassifierModel (preprocessors + classifier as one unit)
+    mlp_classifier.py             # MLPClassifierModel (sklearn MLPClassifier wrapper)
 ```
 
 ---
@@ -613,6 +511,36 @@ No other changes needed — `ClassificationExperiment` and `Evaluator` pick up `
 
 ---
 
+## Lag Delay Preprocessor
+
+`LagDelayEncoder` provides the strongest causal signal available: how late the bus was
+at the previous stop.
+
+**Fast path (precomputed):** If `prev_stop_delay` is already in the dataset (added by
+`add_lag_delay.py` or `build_dataset.py`), the preprocessor only fills NaN (first stop
+of each trip) with the training median delay and drops `trip_id` / `arrival_delay_s`.
+No groupby needed — O(1) operation.
+
+**Slow path (runtime):** If `prev_stop_delay` is missing, computes it on the fly via
+`groupby(_date, trip_id).shift(arrival_delay_s)`. Requires `timestamp`, `trip_id`, and
+`arrival_delay_s` in X (`keep_target_in_X=True`).
+
+Must be placed after `TemporalFeatureExtractor` (needs `timestamp` in the slow path).
+Drops `trip_id` and `arrival_delay_s` after extracting the feature so the model never
+sees the raw target.
+
+```python
+from ml.preprocessors.lag_delay import LagDelayEncoder
+
+LagDelayEncoder()   # fillna uses global median delay from fit()
+```
+
+When `trip_id` is not in the dataset, the column is filled with the median delay
+(constant feature — no signal, but keeps the pipeline consistent). This avoids
+coupling pipeline state to experiment config.
+
+---
+
 ## Feature Expansion Preprocessors
 
 These preprocessors transform the feature matrix before it reaches the model. All follow the `BasePreprocessor` interface (`fit` / `transform` / `fit_transform`).
@@ -705,6 +633,11 @@ df = pd.read_json("results/experiment_log.jsonl", lines=True)
 | `CatBoostRegressorOptimizer` | RMSE | `CatBoostModel` |
 | `LGBMClassifierOptimizer` | Macro-F1 | `LightGBMClassifierModel` |
 | `OrdinalLGBMClassifierOptimizer` | Macro-F1 | `OrdinalClassifierModel(LightGBMClassifierModel)` |
+| `OrdinalXGBoostClassifierOptimizer` | Macro-F1 | `OrdinalClassifierModel(XGBoostClassifierModel)` |
+| `XGBoostClassifierOptimizer` | Macro-F1 | `XGBoostClassifierModel` |
+| `CatBoostClassifierOptimizer` | Macro-F1 | `CatBoostClassifierModel` |
+| `RandomForestClassifierOptimizer` | Macro-F1 | `RandomForestClassifierModel` |
+| `MLPClassifierOptimizer` | Macro-F1 | `MLPClassifierModel` |
 
 All optimizers tune `n_estimators` alongside architecture-specific hyperparameters via `trial.suggest_int("n_estimators", 100, self.n_estimators)`, where the constructor's `n_estimators` parameter acts as the upper bound.
 
@@ -751,6 +684,7 @@ Every model and pipeline can be serialized to disk and reloaded for inference wi
 | `StackingModel` | `joblib.dump()` | Serializes meta-model + base models |
 | `ClassificationStackingModel` | `joblib.dump()` | Serializes meta-model + base models |
 | `PipelinedClassifierModel` | `joblib.dump()` | Serializes inner classifier + preprocessors |
+| `MLPClassifierModel` | `joblib.dump()` | Implicit sklearn serialization |
 
 On `load()`, tree models reconstruct only the sklearn wrapper around the pre-trained booster — the trees themselves are loaded verbatim from disk. For LightGBM and XGBoost sklearn wrappers, internal attributes (`_Booster`, `_n_features`, `_n_features_in`, `fitted_`, and for classifiers `_classes`, `_le`, `_class_map`) are re-injected so `.predict()` and `.predict_proba()` work identically to a freshly fitted model.
 
@@ -765,7 +699,7 @@ _register("LightGBMModel", LightGBMModel)          # called at import time
 cls = _lookup("LightGBMModel")                     # → LightGBMModel class
 ```
 
-All 13 model classes register themselves at the bottom of their respective modules. The registry is populated when `ml.models` is imported (via `ml/models/__init__.py`).
+All 14 model classes register themselves at the bottom of their respective modules. The registry is populated when `ml.models` is imported (via `ml/models/__init__.py`).
 
 ### Pipeline save/load
 

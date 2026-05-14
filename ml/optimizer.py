@@ -10,6 +10,7 @@ from ml.models.xgboost_classifier import XGBoostClassifierModel
 from ml.models.catboost_model import CatBoostModel
 from ml.models.catboost_classifier import CatBoostClassifierModel
 from ml.models.random_forest_classifier import RandomForestClassifierModel
+from ml.models.mlp_classifier import MLPClassifierModel
 from ml.pipeline import MLPipeline
 from ml.preprocessors.base import BasePreprocessor
 from ml.preprocessors.scaler import FeatureScaler
@@ -728,6 +729,92 @@ class RandomForestClassifierOptimizer:
             min_samples_leaf=trial.suggest_int("min_samples_leaf", 1, 10),
             max_features=trial.suggest_categorical("max_features", ["sqrt", "log2", None]),
             class_weight=trial.suggest_categorical("class_weight", ["balanced", "balanced_subsample", None]),
+        )
+        model.fit(X_tr_proc, y_tr)
+        preds = model.predict(X_val_proc)
+        return f1_score(y_val, preds, average="macro")
+
+    def optimize(self) -> optuna.Study:
+        sampler = optuna.samplers.TPESampler(seed=self.seed)
+        study = optuna.create_study(direction="maximize", sampler=sampler)
+        try:
+            study.optimize(
+                self._objective,
+                n_trials=self.n_trials,
+                show_progress_bar=True,
+            )
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user. Printing best results found so far...")
+
+        print(f"\nBest macro-F1: {study.best_value:.4f}")
+        print("Best params:")
+        for k, v in study.best_params.items():
+            print(f"  {k}: {v}")
+
+        return study
+
+
+class MLPClassifierOptimizer:
+    """Bayesian hyperparameter search for MLPClassifierModel, maximising macro-F1."""
+
+    def __init__(
+        self,
+        loader: DataLoader,
+        binner: DelayBinner | None = None,
+        preprocessors: List[BasePreprocessor] | None = None,
+        n_trials: int = 100,
+        max_iter: int = 500,
+        val_fraction: float = 0.15,
+        seed: int | None = 42,
+    ):
+        self.loader = loader
+        self.binner = binner or DelayBinner()
+        self.preprocessors = preprocessors or [TemporalFeatureExtractor()]
+        self.n_trials = n_trials
+        self.max_iter = max_iter
+        self.val_fraction = val_fraction
+        self.seed = seed
+        self._data = None
+
+    def _load_once(self):
+        if self._data is None:
+            self._data = self.loader.load()
+        return self._data
+
+    def _objective(self, trial: optuna.Trial) -> float:
+        X_train_full, _, y_train_full, _ = self._load_once()
+
+        y_enc_full = self.binner.encode(y_train_full)
+        X_tr, X_val, y_tr_raw, y_val_raw = train_test_split(
+            X_train_full, y_train_full,
+            test_size=self.val_fraction, random_state=trial.number, stratify=y_enc_full,
+        )
+        y_tr = self.binner.encode(y_tr_raw)
+        y_val = self.binner.encode(y_val_raw)
+
+        X_tr_proc = X_tr.copy()
+        for p in self.preprocessors:
+            X_tr_proc = p.fit_transform(X_tr_proc, y_tr_raw)
+        X_val_proc = X_val.copy()
+        for p in self.preprocessors:
+            X_val_proc = p.transform(X_val_proc)
+
+        n_layers = trial.suggest_int("n_layers", 2, 4)
+        layer_sizes = tuple(
+            trial.suggest_int(f"layer_{i}", 32, 256, step=32)
+            for i in range(n_layers)
+        )
+
+        model = MLPClassifierModel(
+            hidden_layer_sizes=layer_sizes,
+            alpha=trial.suggest_float("alpha", 1e-5, 1.0, log=True),
+            learning_rate_init=trial.suggest_float("learning_rate_init", 1e-4, 0.01, log=True),
+            learning_rate=trial.suggest_categorical("learning_rate", ["constant", "adaptive"]),
+            batch_size=trial.suggest_categorical("batch_size", [32, 64, 128, 256]),
+            max_iter=self.max_iter,
+            early_stopping=True,
+            validation_fraction=0.1,
+            random_state=self.seed,
         )
         model.fit(X_tr_proc, y_tr)
         preds = model.predict(X_val_proc)

@@ -11,3 +11,4 @@ from ml.models.stacking import StackingModel
 from ml.models.classification_stacking import ClassificationStackingModel
 from ml.models.ordinal_classifier import OrdinalClassifierModel
 from ml.models.pipelined_classifier import PipelinedClassifierModel
+from ml.models.mlp_classifier import MLPClassifierModel

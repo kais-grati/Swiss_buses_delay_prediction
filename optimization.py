@@ -3,7 +3,7 @@ from ml.optimizer import (
     LGBMClassifierOptimizer, OrdinalLGBMClassifierOptimizer,
     OrdinalXGBoostClassifierOptimizer,
     XGBoostClassifierOptimizer, CatBoostClassifierOptimizer,
-    RandomForestClassifierOptimizer,
+    RandomForestClassifierOptimizer, MLPClassifierOptimizer,
 )
 from ml.preprocessors.scaler import FeatureScaler
 from ml.preprocessors.string_encoder import StringEncoder
@@ -12,7 +12,7 @@ from ml.preprocessors.wind_merger import WindMerger
 
 from rich.panel import Panel
 
-from config import console, loader_enhanced, binner
+from config import console, loader_enhanced, loader_lag, binner
 
 
 def run_optimization():
@@ -44,7 +44,7 @@ def run_optimization():
             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth",]),
         ]
     )
-    ordinal_study = ordinal_optimizer.optimize()
+    # ordinal_study = ordinal_optimizer.optimize()
 
     # ── Ordinal XGBoost Optimizer ──────────────────────────────────────────────────
     """
@@ -72,7 +72,7 @@ def run_optimization():
             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth",]),
         ]
     )
-    ordinal_xgb_study = ordinal_xgb_optimizer.optimize()
+    # ordinal_xgb_study = ordinal_xgb_optimizer.optimize()
 
     """
       n_estimators: 1387
@@ -125,7 +125,7 @@ def run_optimization():
             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth",]),
         ]
     )
-    study = optimizer.optimize()
+    # study = optimizer.optimize()
 
     """
       n_estimators: 440
@@ -149,7 +149,7 @@ def run_optimization():
             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth",]),
         ]
     )
-    study = optimizer.optimize()
+    # study = optimizer.optimize()
 
     """
       n_estimators: 357
@@ -171,4 +171,23 @@ def run_optimization():
             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth",]),
         ]
     )
-    study = optimizer.optimize()
+    # study = optimizer.optimize()
+
+    # ── MLP-Lag Optimizer ──────────────────────────────────────────────────────
+    optimizer = MLPClassifierOptimizer(
+        loader=loader_lag,
+        binner=binner,
+        n_trials=80,
+        max_iter=500,
+        preprocessors= [
+            TemporalFeatureExtractor(),
+            WindMerger(),
+            StringEncoder(cols=["operator", "line"]),
+            FeatureScaler([
+                "temperature", "precipitation", "sunshine", "humidity",
+                "wind", "pressure", "snow_depth", "prev_stop_delay",
+                "hour", "dow", "month",
+            ]),
+        ]
+    )
+    # study = optimizer.optimize()

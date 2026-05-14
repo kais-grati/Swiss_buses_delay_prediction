@@ -10,3 +10,4 @@ CLAUDE.md
 *.pyc
 /catboost_info
 /saved_models
+/data

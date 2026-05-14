@@ -7,6 +7,7 @@ DATA_DIR = ROOT / "data" / "cleaned_data"
 
 KEEP_COLS = {
     "DATE",
+    "TRIP_ID",
     "OPERATOR_ABB",
     "LINE_NAME",
     "BPUIC",

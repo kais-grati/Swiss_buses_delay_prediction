@@ -15,6 +15,7 @@ from ml.models.ordinal_classifier import OrdinalClassifierModel
 from ml.models.logistic_regression import LogisticRegressionModel
 from ml.models.classification_stacking import ClassificationStackingModel
 from ml.models.pipelined_classifier import PipelinedClassifierModel
+from ml.models.mlp_classifier import MLPClassifierModel
 from ml.experiment import ClassificationExperiment
 
 from pathlib import Path
@@ -24,7 +25,7 @@ from rich.panel import Panel
 from rich import print as rprint
 
 from config import (
-    console, loader_enhanced, evaluator, binner, logger,
+    console, loader_enhanced, loader_lag, evaluator, binner, logger,
     LOGREG_NUMERIC,
 )
 
@@ -218,29 +219,53 @@ class_experiments = {
     #     evaluator=evaluator,
     #     encoder=binner,
     # ),
-    "Ordinal-XGBoost": ClassificationExperiment(
-        loader=loader_enhanced,
+    # "Ordinal-XGBoost": ClassificationExperiment(
+    #     loader=loader_enhanced,
+    #     pipeline=MLPipeline(
+    #         preprocessors=[
+    #             TemporalFeatureExtractor(),
+    #             WindMerger(),
+    #             StringEncoder(cols=["operator", "line"]),
+    #             FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth",]),
+    #         ],
+    #         model=OrdinalClassifierModel(
+    #             base_model=XGBoostClassifierModel(
+    #                 n_estimators = 573,
+    #                 scale_pos_weight = 0.6569387115853094,
+    #                 learning_rate = 0.022365990585442086,
+    #                 max_depth = 8,
+    #                 min_child_weight = 2.594662538392548,
+    #                 gamma = 0.00043870628771772006,
+    #                 subsample = 0.5893496666560825,
+    #                 colsample_bytree = 0.756233084869846,
+    #                 colsample_bylevel = 0.7301284243764258,
+    #                 reg_alpha = 0.001212947904518468,
+    #                 reg_lambda = 0.23978457224831312
+    #             ),
+    #         ),
+    #     ),
+    #     evaluator=evaluator,
+    #     encoder=binner,
+    # ),
+
+    "LGBM-Lag": ClassificationExperiment(
+        loader=loader_lag,
         pipeline=MLPipeline(
             preprocessors=[
                 TemporalFeatureExtractor(),
                 WindMerger(),
                 StringEncoder(cols=["operator", "line"]),
-                FeatureScaler(["temperature", "precipitation", "sunshine", "humidity", "wind", "pressure", "snow_depth",]),
             ],
-            model=OrdinalClassifierModel(
-                base_model=XGBoostClassifierModel(
-                    n_estimators = 573,
-                    scale_pos_weight = 0.6569387115853094,
-                    learning_rate = 0.022365990585442086,
-                    max_depth = 8,
-                    min_child_weight = 2.594662538392548,
-                    gamma = 0.00043870628771772006,
-                    subsample = 0.5893496666560825,
-                    colsample_bytree = 0.756233084869846,
-                    colsample_bylevel = 0.7301284243764258,
-                    reg_alpha = 0.001212947904518468,
-                    reg_lambda = 0.23978457224831312
-                ),
+            model=LightGBMClassifierModel(
+                early_stopping_rounds=50,
+                n_estimators=1000,
+                learning_rate=0.05,
+                num_leaves=127,
+                min_child_samples=100,
+                subsample=0.8,
+                colsample_bytree=0.7,
+                reg_alpha=0.1,
+                reg_lambda=0.1,
             ),
         ),
         evaluator=evaluator,

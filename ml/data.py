@@ -14,6 +14,7 @@ class DataLoader:
         test_size: float = 0.2,
         random_state: int = 42,
         sample_n: Optional[int] = None,
+        keep_target_in_X: bool = False,
     ):
         self.path = path
         self.target = target
@@ -21,6 +22,7 @@ class DataLoader:
         self.test_size = test_size
         self.random_state = random_state
         self.sample_n = sample_n
+        self.keep_target_in_X = keep_target_in_X
 
     def load(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
         if self.sample_n is not None:
@@ -31,7 +33,7 @@ class DataLoader:
         else:
             df = pq.read_table(self.path).to_pandas()
         df = df.drop(columns=[c for c in self.drop_cols if c in df.columns])
-        X = df.drop(columns=[self.target])
+        X = df if self.keep_target_in_X else df.drop(columns=[self.target])
         y = df[self.target]
         if self.test_size <= 0:
             return None, X, None, y

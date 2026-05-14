@@ -2,18 +2,17 @@ import os
 import duckdb
 
 MUNICIPALITIES = [
-    # "Bussigny",
+    "Bussigny",
     "Chavannes-près-Renens",
     "Crissier",
     "Ecublens (VD)",
-    # "Prilly",
+    "Prilly",
     "Renens (VD)",
     "Saint-Sulpice (VD)",
-    # "Villars-Sainte-Croix",
-    # "Lausanne",
+    "Lausanne",
 ]
 
-OUTPUT = "data/dataset_lausanne_small.parquet"
+OUTPUT = "data/lausanne_region.parquet"
 SOURCE = "data/dataset_with_weather.parquet"
 STATIONS = "data/station_data.parquet"
 
@@ -40,7 +39,7 @@ print(f"Found {len(stop_ids)} unique stop IDs in target municipalities")
 # DuckDB pushes this down to the Parquet scanner — row groups without
 # matching stop_ids are skipped, keeping memory usage low.
 id_list = ", ".join(str(i) for i in stop_ids)
-print("Extracting matching rows from 4.7 GB dataset (this streams, not loads)...")
+print("Extracting matching rows from dataset (this streams, not loads)...")
 con.execute(f"""
     COPY (
         SELECT * FROM read_parquet('{SOURCE}')

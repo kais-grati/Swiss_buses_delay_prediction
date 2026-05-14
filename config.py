@@ -15,11 +15,11 @@ TARGET  = "arrival_delay_s"
 
 DROP_COLS = [
     "timestamp", "stop_id", "stop_name", "operator", "line",
-    "departure_delay_s",
+    "departure_delay_s", "trip_id"
 ]
 
 DROP_COLS_KEEP_TS = [
-    "stop_name", "departure_delay_s",
+    "stop_name", "departure_delay_s", "trip_id"
 ]
 
 NUMERIC_COLS = [
@@ -38,10 +38,10 @@ NUMERIC_COLS_LOGREG_FULL = NUMERIC_COLS + TEMPORAL_COLS + ["wind_chill", "hist_m
 NUMERIC_COLS_ENHANCED = NUMERIC_COLS + ["wind_chill"]
 
 # Lag delay feature (precomputed by build_dataset.py, no runtime LagDelayEncoder needed)
-LAG_COLS = ["prev_stop_delay"]
+LAG_COLS = ["prev_stop_delay", "dist_to_prev_stop"]
 
 # Full numeric set with lag features
-NUMERIC_COLS_LAG = NUMERIC_COLS + ["prev_stop_delay"]
+NUMERIC_COLS_LAG = NUMERIC_COLS + ["prev_stop_delay", "dist_to_prev_stop"]
 
 # Scaled numeric set for logistic regression after WindMerger + TemporalFeatureExtractor
 LOGREG_NUMERIC = [

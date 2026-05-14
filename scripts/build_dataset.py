@@ -72,7 +72,24 @@ def _build_holiday_dates():
     return holiday_dates
 
 
+def _build_stop_coords():
+    """Return {stop_id: (lv95east, lv95north)} from station_data.parquet."""
+    station_data = ROOT / "data" / "station_data.parquet"
+    if not station_data.exists():
+        return {}
+    stops = pq.read_table(
+        station_data, columns=["number", "lv95east", "lv95north"]
+    ).to_pandas().dropna(subset=["lv95east", "lv95north"])
+    stops["stop_id"] = pd.to_numeric(stops["number"], errors="coerce").astype("Int64")
+    stops = stops.dropna(subset=["stop_id"])
+    return dict(zip(
+        stops["stop_id"].astype("int32"),
+        zip(stops["lv95east"].astype("float64"), stops["lv95north"].astype("float64")),
+    ))
+
+
 STOP_CANTON   = _build_stop_canton_map()
+STOP_COORDS   = _build_stop_coords()
 HOLIDAY_DATES = _build_holiday_dates()
 
 # German → English column mapping (full set, 21 columns)
@@ -149,7 +166,8 @@ EXPECTED_SCHEMA = pa.schema([
     ("departure_delay_s",  pa.int32()),
     ("is_public_holiday",  pa.bool_()),
     ("trip_id",            pa.large_string()),
-    ("prev_stop_delay",    pa.int32()),
+    ("prev_stop_delay",      pa.int32()),
+    ("dist_to_prev_stop",   pa.float32()),
 ])
 
 
@@ -359,8 +377,42 @@ def process_csv(args):
             .astype("Int32")
         )
 
-        # Drop first-stop-of-trip rows that have no previous stop delay
-        result = result[result["prev_stop_delay"].notna()].reset_index(drop=True)
+        # dist_to_prev_stop: LV95 Euclidean distance (m) to previous stop in same trip
+        if STOP_COORDS:
+            coords_east, coords_north = zip(*[
+                STOP_COORDS.get(sid, (np.nan, np.nan))
+                for sid in result["stop_id"]
+            ])
+            coords_east = np.array(coords_east, dtype="float64")
+            coords_north = np.array(coords_north, dtype="float64")
+
+            prev_trip = None
+            prev_east = prev_north = np.nan
+            distances = np.full(len(result), np.nan, dtype="float32")
+
+            for i in range(len(result)):
+                trip = result["trip_id"].iloc[i]
+                if trip != prev_trip:
+                    distances[i] = np.nan
+                else:
+                    de = coords_east[i] - prev_east
+                    dn = coords_north[i] - prev_north
+                    distances[i] = np.sqrt(de * de + dn * dn) if not (
+                        np.isnan(de) or np.isnan(dn)
+                    ) else np.nan
+                prev_trip = trip
+                prev_east = coords_east[i]
+                prev_north = coords_north[i]
+
+            result["dist_to_prev_stop"] = distances
+        else:
+            result["dist_to_prev_stop"] = np.nan
+
+        # Drop first-stop-of-trip rows and zero-distance rows (duplicate stop)
+        result = result[
+            result["prev_stop_delay"].notna()
+            & ~(result["dist_to_prev_stop"].fillna(-1) == 0.0)
+        ].reset_index(drop=True)
 
         if len(result) == 0:
             return csv_name, 0, 0, None
@@ -474,6 +526,17 @@ def run_tests():
               f"(min={lag_valid.min():.0f}s  max={lag_valid.max():.0f}s)")
         if not ok:
             all_ok = False
+
+    # dist_to_prev_stop — no NaN, no zeros, all >= 1m
+    dists = df_out["dist_to_prev_stop"]
+    dist_nans = dists.isna().sum()
+    dist_zeros = (dists == 0.0).sum()
+    ok = dist_nans == 0 and dist_zeros == 0 and len(dists) > 0
+    print(f"  {'PASS' if ok else 'FAIL'}  dist_to_prev_stop has {len(dists):,} values "
+          f"(NaN={dist_nans}, zero={dist_zeros})  "
+          f"min={dists.min():.0f}m  max={dists.max():.0f}m")
+    if not ok:
+        all_ok = False
 
     # Public holiday is a boolean column with both values
     holiday_vals = df_out["is_public_holiday"].unique()

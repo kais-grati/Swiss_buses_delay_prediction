@@ -1,3 +1,8 @@
+The following classification experiments were performed on the dataset without the delays at the previous stop feature. Regression results were poor same for multi class classification. The best I managed to get was for binary classification were the class boundary was a delay threshold (180s).
+
+_______________________________________________________________
+
+
 Hyperparams tuned on lausanne 50k 
 Inference on lausanne 50k
 

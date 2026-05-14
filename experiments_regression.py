@@ -1,367 +1,653 @@
 from ml.pipeline import MLPipeline
 from ml.preprocessors.scaler import FeatureScaler
 from ml.preprocessors.temporal import TemporalFeatureExtractor
+from ml.preprocessors.string_encoder import StringEncoder
+from ml.preprocessors.wind_merger import WindMerger
 from ml.preprocessors.target_encoder import HistoricalMeanEncoder
 from ml.preprocessors.weather_engineer import WeatherFeatureEngineer
+from ml.preprocessors.nystroem import NystroemExpander
+from ml.preprocessors.polynomial import PolynomialExpander
+from ml.preprocessors.pca import PCAReducer
 from ml.models.lgbm import LightGBMModel
 from ml.models.xgboost_model import XGBoostModel
 from ml.models.catboost_model import CatBoostModel
 from ml.models.ridge import RidgeModel
+from ml.models.random_forest_regressor import RandomForestRegressorModel
 from ml.models.stacking import StackingModel
+from ml.models.residual_stacking import ResidualStackingModel
+from ml.models.log_target import LogTargetModel
+from ml.models.hierarchical import HierarchicalRegressor
+from ml.models.ordinal_regressor import OrdinalRegressorModel
+from ml.models.lgbm_classifier import LightGBMClassifierModel
+from ml.models.xgboost_classifier import XGBoostClassifierModel
+from ml.preprocessors.delay_binner import DelayBinner
 from ml.experiment import Experiment
 
 from rich.table import Table
 from rich.panel import Panel
 
 from config import (
-    console, loader, loader_enhanced, evaluator, logger,
-    NUMERIC_COLS, NUMERIC_COLS_ENHANCED,
+    console, loader, loader_enhanced, loader_lag, evaluator, logger,
 )
 
 experiments = {
-    # "LightGBM": Experiment(
-    #     loader=loader,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[FeatureScaler(cols=NUMERIC_COLS)],
-    #         model=LightGBMModel(n_estimators=500, learning_rate=0.05, num_leaves=31),
-    #     ),
-    #     evaluator=evaluator,
-    # ),
-    # "LightGBM-tuned": Experiment(
-    #     loader=loader,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[FeatureScaler(cols=NUMERIC_COLS)],
-    #         model=LightGBMModel(
-    #             n_estimators=4000,
-    #             learning_rate=0.01,
-    #             num_leaves=50,
-    #             min_child_samples=50,
-    #             max_bin=512,
-    #             subsample_freq=1,
-    #             subsample=0.8,
-    #             colsample_bytree=0.8,
-    #             reg_alpha=0.1,
-    #             reg_lambda=0.1,
-    #             min_gain_to_split=0.01,
-    #             early_stopping_rounds=50,
-    #             log_every=100,
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    # ),
-    # "LightGBM-optuna": Experiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[FeatureScaler(cols=NUMERIC_COLS),
-    #                        TemporalFeatureExtractor()],
-    #         model=LightGBMModel(
-    #             n_estimators=3000,
-    #             early_stopping_rounds=50,
-    #             learning_rate=0.011164245970961571,
-    #             num_leaves=116,
-    #             min_child_samples=43,
-    #             min_sum_hessian_in_leaf=0.9756353974751673,
-    #             subsample=0.9363929416897576,
-    #             subsample_freq=1,
-    #             colsample_bytree=0.9988094388849174,
-    #             feature_fraction_bynode=0.9450155202549205,
-    #             reg_alpha=0.27245190090589816,
-    #             reg_lambda=0.78391786930204,
-    #             path_smooth=4.405998450654837,
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    # ),
-    # "LightGBM-optuna2": Experiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[FeatureScaler(cols=NUMERIC_COLS),
-    #                        TemporalFeatureExtractor()],
-    #         model=LightGBMModel(
-    #             n_estimators=3000,
-    #             early_stopping_rounds=50,
-    #             learning_rate=0.024864985683759746,
-    #             num_leaves=78,
-    #             min_child_samples=86,
-    #             min_sum_hessian_in_leaf=0.013837807248223857,
-    #             subsample=0.9940870655183781,
-    #             subsample_freq=1,
-    #             colsample_bytree=0.6580004324956996,
-    #             feature_fraction_bynode=0.9019956230179453,
-    #             reg_alpha=0.29733122973301546,
-    #             reg_lambda=0.006579169405573432,
-    #             path_smooth=5.094559948404132,
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    # ),
-    # "LightGBM-optuna3": Experiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #                         WeatherFeatureEngineer(),
-    #                         FeatureScaler(cols=NUMERIC_COLS),
-    #                         TemporalFeatureExtractor()
-    #                         ],
-    #         model=LightGBMModel(
-    #             n_estimators=3000,
-    #             early_stopping_rounds=50,
-    #             learning_rate=0.007126947042377407,
-    #             num_leaves=168,
-    #             min_child_samples=40,
-    #             min_sum_hessian_in_leaf=0.0899176805301358,
-    #             subsample=0.9998756827358574,
-    #             subsample_freq=1,
-    #             colsample_bytree=0.5757330744549699,
-    #             feature_fraction_bynode=0.9734799081519098,
-    #             reg_alpha=1.7021369826715338,
-    #             reg_lambda=7.970747211586931,
-    #             path_smooth=4.671171717084908,
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    # ),
-    # "LightGBM-dart": Experiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             FeatureScaler(cols=NUMERIC_COLS),
-    #         ],
-    #         model=LightGBMModel(
-    #             boosting_type="dart",
-    #             n_estimators=1000,
-    #             learning_rate=0.05,
-    #             num_leaves=116,
-    #             min_child_samples=43,
-    #             subsample=0.9363929416897576,
-    #             subsample_freq=1,
-    #             colsample_bytree=0.9988094388849174,
-    #             reg_alpha=0.27245190090589816,
-    #             reg_lambda=0.78391786930204,
-    #             drop_rate=0.1,
-    #             skip_drop=0.5,
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    # ),
-    # "Stacking": Experiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             FeatureScaler(cols=NUMERIC_COLS),
-    #         ],
-    #         model=StackingModel(
-    #             base_models=[
-    #                 LightGBMModel(
-    #                     n_estimators=3000,
-    #                     early_stopping_rounds=50,
-    #                     learning_rate=0.011164245970961571,
-    #                     num_leaves=116,
-    #                     min_child_samples=43,
-    #                     min_sum_hessian_in_leaf=0.9756353974751673,
-    #                     subsample=0.9363929416897576,
-    #                     subsample_freq=1,
-    #                     colsample_bytree=0.9988094388849174,
-    #                     feature_fraction_bynode=0.9450155202549205,
-    #                     reg_alpha=0.27245190090589816,
-    #                     reg_lambda=0.78391786930204,
-    #                     path_smooth=4.405998450654837,
-    #                 ),
-    #                 XGBoostModel(
-    #                     n_estimators=500,
-    #                     learning_rate=0.03809720744535876,
-    #                     min_child_weight=90.28669329772264,
-    #                     gamma=0.016744637853508566,
-    #                     max_depth=9,
-    #                     subsample=0.9335838518925651,
-    #                     colsample_bytree=0.9389806288470189,
-    #                     colsample_bylevel=0.8337241352904957,
-    #                     reg_alpha=0.00035666207579412883,
-    #                     reg_lambda=1.8707902692338567
-    #                 ),
-    #             ],
-    #             meta_model=RidgeModel(alpha=1.0),
-    #             n_folds=5,
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    # ),
-    # "Stacking2": Experiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             FeatureScaler(cols=NUMERIC_COLS),
-    #         ],
-    #         model=StackingModel(
-    #             base_models=[
-    #                 LightGBMModel(
-    #                     n_estimators=3000,
-    #                     early_stopping_rounds=50,
-    #                     learning_rate=0.024864985683759746,
-    #                     num_leaves=78,
-    #                     min_child_samples=86,
-    #                     min_sum_hessian_in_leaf=0.013837807248223857,
-    #                     subsample=0.9940870655183781,
-    #                     subsample_freq=1,
-    #                     colsample_bytree=0.6580004324956996,
-    #                     feature_fraction_bynode=0.9019956230179453,
-    #                     reg_alpha=0.29733122973301546,
-    #                     reg_lambda=0.006579169405573432,
-    #                     path_smooth=5.094559948404132,
-    #                 ),
-    #                 XGBoostModel(
-    #                     n_estimators=500,
-    #                     learning_rate=0.03809720744535876,
-    #                     min_child_weight=90.28669329772264,
-    #                     gamma=0.016744637853508566,
-    #                     max_depth=9,
-    #                     subsample=0.9335838518925651,
-    #                     colsample_bytree=0.9389806288470189,
-    #                     colsample_bylevel=0.8337241352904957,
-    #                     reg_alpha=0.00035666207579412883,
-    #                     reg_lambda=1.8707902692338567
-    #                 ),
-    #                 CatBoostModel(
-    #                     n_estimators=2000,
-    #                     learning_rate=0.05543418338273171,
-    #                     depth=5,
-    #                     early_stopping_rounds=50,
-    #                     l2_leaf_reg=0.540507962054327,
-    #                     random_strength=0.16061584861239986,
-    #                     bagging_temperature=0.49356279590945856,
-    #                     min_data_in_leaf=62
-    #         ),
-    #             ],
-    #             meta_model=RidgeModel(alpha=1),
-    #             n_folds=5,
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    # ),
-    # "CatBoost": Experiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             FeatureScaler(cols=NUMERIC_COLS),
-    #         ],
-    #         model=CatBoostModel(
-    #             n_estimators=200,
-    #             learning_rate=0.05543418338273171,
-    #             depth=5,
-    #             early_stopping_rounds=50,
-    #             l2_leaf_reg=0.540507962054327,
-    #             random_strength=0.16061584861239986,
-    #             bagging_temperature=0.49356279590945856,
-    #             min_data_in_leaf=62
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    # )
-    # "LightGBM-enhanced": Experiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
-    #             WeatherFeatureEngineer(),
-    #             FeatureScaler(cols=NUMERIC_COLS_ENHANCED),
-    #         ],
-    #         model=LightGBMModel(
-    #             n_estimators=3000,
-    #             early_stopping_rounds=50,
-    #             learning_rate=0.011164245970961571,
-    #             num_leaves=116,
-    #             min_child_samples=43,
-    #             min_sum_hessian_in_leaf=0.9756353974751673,
-    #             subsample=0.9363929416897576,
-    #             subsample_freq=1,
-    #             colsample_bytree=0.9988094388849174,
-    #             feature_fraction_bynode=0.9450155202549205,
-    #             reg_alpha=0.27245190090589816,
-    #             reg_lambda=0.78391786930204,
-    #             path_smooth=4.405998450654837,
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    # ),
-    # "XGBoost": Experiment(
-    #     loader=loader,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[FeatureScaler(cols=NUMERIC_COLS)],
-    #         model=XGBoostModel(
-    #             n_estimators=500,
-    #             learning_rate=0.03809720744535876,
-    #             min_child_weight=90.28669329772264,
-    #             gamma=0.016744637853508566,
-    #             max_depth=9,
-    #             subsample=0.9335838518925651,
-    #             colsample_bytree=0.9389806288470189,
-    #             colsample_bylevel=0.8337241352904957,
-    #             reg_alpha=0.00035666207579412883,
-    #             reg_lambda=1.8707902692338567,
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    # ),
-    # ── LightGBM: best optuna params + full feature engineering ──────────────────
-    # "LGBM-Optuna-Full": Experiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             WeatherFeatureEngineer(),
-    #             FeatureScaler(cols=NUMERIC_COLS_ENHANCED),
-    #         ],
-    #         model=LightGBMModel(
-    #             n_estimators=3000,
-    #             early_stopping_rounds=50,
-    #             learning_rate=0.007126947042377407,
-    #             num_leaves=168,
-    #             min_child_samples=40,
-    #             min_sum_hessian_in_leaf=0.0899176805301358,
-    #             subsample=0.9998756827358574,
-    #             subsample_freq=1,
-    #             colsample_bytree=0.5757330744549699,
-    #             feature_fraction_bynode=0.9734799081519098,
-    #             reg_alpha=1.7021369826715338,
-    #             reg_lambda=7.970747211586931,
-    #             path_smooth=4.671171717084908,
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    # ),
-    # ── LightGBM: + HistoricalMeanEncoder (never tried for regression) ───────────
-    # "LGBM-HistMean": Experiment(
-    #     loader=loader_enhanced,
-    #     pipeline=MLPipeline(
-    #         preprocessors=[
-    #             TemporalFeatureExtractor(),
-    #             WeatherFeatureEngineer(),
-    #             HistoricalMeanEncoder(group_cols=["hour", "dow"], output_col="hist_mean_delay"),
-    #             FeatureScaler(cols=NUMERIC_COLS_ENHANCED + ["hist_mean_delay"]),
-    #         ],
-    #         model=LightGBMModel(
-    #             n_estimators=3000,
-    #             early_stopping_rounds=50,
-    #             learning_rate=0.007126947042377407,
-    #             num_leaves=168,
-    #             min_child_samples=40,
-    #             min_sum_hessian_in_leaf=0.0899176805301358,
-    #             subsample=0.9998756827358574,
-    #             subsample_freq=1,
-    #             colsample_bytree=0.5757330744549699,
-    #             feature_fraction_bynode=0.9734799081519098,
-    #             reg_alpha=1.7021369826715338,
-    #             reg_lambda=7.970747211586931,
-    #             path_smooth=4.671171717084908,
-    #         ),
-    #     ),
-    #     evaluator=evaluator,
-    # ),
+    "LightGBM": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+            ],
+            model=LightGBMModel(
+                n_estimators=1062,
+                learning_rate=0.01103,
+                num_leaves=65,
+                min_child_samples=76,
+                min_sum_hessian_in_leaf=0.1572,
+                subsample=0.9314,
+                subsample_freq=1,
+                colsample_bytree=0.5783,
+                feature_fraction_bynode=0.8145,
+                reg_alpha=0.001796,
+                reg_lambda=0.2327,
+                path_smooth=1.373,
+                early_stopping_rounds=50,
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "XGBoost": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+            ],
+            model=XGBoostModel(
+                n_estimators=1102,
+                learning_rate=0.02089,
+                max_depth=7,
+                min_child_weight=6.068,
+                gamma=0.000983,
+                subsample=0.9602,
+                colsample_bytree=0.6652,
+                colsample_bylevel=0.9709,
+                reg_alpha=0.7871,
+                reg_lambda=5.793,
+                early_stopping_rounds=50,
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "CatBoost": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+            ],
+            model=CatBoostModel(
+                n_estimators=1410,
+                learning_rate=0.05149,
+                depth=10,
+                l2_leaf_reg=1.968,
+                random_strength=0.03778,
+                bagging_temperature=0.7664,
+                min_data_in_leaf=72,
+                early_stopping_rounds=50,
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "RandomForest": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+            ],
+            model=RandomForestRegressorModel(
+                n_estimators=393,
+                max_depth=26,
+                min_samples_split=10,
+                min_samples_leaf=4,
+                max_features=0.5,
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Ridge": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler(cols=[
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                    "hour", "dow", "month",
+                    "prev_stop_delay",
+                    "dist_to_prev_stop",
+                ]),
+            ],
+            model=RidgeModel(alpha=2.882),
+        ),
+        evaluator=evaluator,
+    ),
+    "Ridge-PCA": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler(cols=[
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                    "hour", "dow", "month",
+                    "prev_stop_delay",
+                    "dist_to_prev_stop",
+                ]),
+                PCAReducer(variance_threshold=0.99),
+            ],
+            model=RidgeModel(alpha=2.882),
+        ),
+        evaluator=evaluator,
+    ),
+    "Ridge-Poly2": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler(cols=[
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                    "hour", "dow", "month",
+                    "prev_stop_delay",
+                    "dist_to_prev_stop",
+                ]),
+                PolynomialExpander(cols=[
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "hour", "dow",
+                ], degree=2),
+            ],
+            model=RidgeModel(alpha=2.882),
+        ),
+        evaluator=evaluator,
+    ),
+    "Ridge-HistMean": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                HistoricalMeanEncoder(group_cols=["operator", "line"]),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler(cols=[
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                    "hour", "dow", "month",
+                    "prev_stop_delay",
+                    "dist_to_prev_stop",
+                ]),
+            ],
+            model=RidgeModel(alpha=2.882),
+        ),
+        evaluator=evaluator,
+    ),
+    "Ridge-Nystroem": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler(cols=[
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                    "hour", "dow", "month",
+                    "prev_stop_delay",
+                    "dist_to_prev_stop",
+                ]),
+                NystroemExpander(n_components=100, kernel="rbf"),
+            ],
+            model=RidgeModel(alpha=2.882),
+        ),
+        evaluator=evaluator,
+    ),
+    "Ordinal-LGBM": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler([
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                ]),
+            ],
+            model=OrdinalRegressorModel(
+                base_model=LightGBMClassifierModel(
+                    n_estimators=500,
+                    learning_rate=0.05,
+                    num_leaves=63,
+                    min_child_samples=100,
+                    subsample=0.8,
+                    colsample_bytree=0.7,
+                    reg_alpha=0.1,
+                    reg_lambda=0.1,
+                ),
+                binner=DelayBinner(bins=[60, 120, 300]),
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Ordinal-LGBM-fine": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler([
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                ]),
+            ],
+            model=OrdinalRegressorModel(
+                base_model=LightGBMClassifierModel(
+                    n_estimators=500,
+                    learning_rate=0.05,
+                    num_leaves=63,
+                    min_child_samples=100,
+                    subsample=0.8,
+                    colsample_bytree=0.7,
+                    reg_alpha=0.1,
+                    reg_lambda=0.1,
+                ),
+                binner=DelayBinner(bins=[30, 60, 120, 300, 600]),
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Ordinal-XGB": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler([
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                ]),
+            ],
+            model=OrdinalRegressorModel(
+                base_model=XGBoostClassifierModel(
+                    n_estimators=500,
+                    learning_rate=0.05,
+                    max_depth=6,
+                    subsample=0.8,
+                    colsample_bytree=0.8,
+                    reg_alpha=0.1,
+                    reg_lambda=1.0,
+                ),
+                binner=DelayBinner(bins=[60, 120, 300]),
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Residual-LGBM-XGB": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+            ],
+            model=ResidualStackingModel(
+                stage1_model=LightGBMModel(
+                    n_estimators=1062,
+                    learning_rate=0.01103,
+                    num_leaves=65,
+                    min_child_samples=76,
+                    min_sum_hessian_in_leaf=0.1572,
+                    subsample=0.9314,
+                    subsample_freq=1,
+                    colsample_bytree=0.5783,
+                    feature_fraction_bynode=0.8145,
+                    reg_alpha=0.001796,
+                    reg_lambda=0.2327,
+                    path_smooth=1.373,
+                    early_stopping_rounds=50,
+                ),
+                stage2_model=XGBoostModel(
+                    n_estimators=1102,
+                    learning_rate=0.02089,
+                    max_depth=7,
+                    min_child_weight=6.068,
+                    gamma=0.000983,
+                    subsample=0.9602,
+                    colsample_bytree=0.6652,
+                    colsample_bylevel=0.9709,
+                    reg_alpha=0.7871,
+                    reg_lambda=5.793,
+                    early_stopping_rounds=50,
+                ),
+                n_folds=5,
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Residual-LGBM-Ridge": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler(cols=[
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                    "hour", "dow", "month",
+                    "prev_stop_delay",
+                    "dist_to_prev_stop",
+                ]),
+            ],
+            model=ResidualStackingModel(
+                stage1_model=LightGBMModel(
+                    n_estimators=1062,
+                    learning_rate=0.01103,
+                    num_leaves=65,
+                    min_child_samples=76,
+                    min_sum_hessian_in_leaf=0.1572,
+                    subsample=0.9314,
+                    subsample_freq=1,
+                    colsample_bytree=0.5783,
+                    feature_fraction_bynode=0.8145,
+                    reg_alpha=0.001796,
+                    reg_lambda=0.2327,
+                    path_smooth=1.373,
+                    early_stopping_rounds=50,
+                ),
+                stage2_model=RidgeModel(alpha=2.882),
+                n_folds=5,
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Log-LGBM": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+            ],
+            model=LogTargetModel(
+                model=LightGBMModel(
+                    n_estimators=1062,
+                    learning_rate=0.01103,
+                    num_leaves=65,
+                    min_child_samples=76,
+                    min_sum_hessian_in_leaf=0.1572,
+                    subsample=0.9314,
+                    subsample_freq=1,
+                    colsample_bytree=0.5783,
+                    feature_fraction_bynode=0.8145,
+                    reg_alpha=0.001796,
+                    reg_lambda=0.2327,
+                    path_smooth=1.373,
+                    early_stopping_rounds=50,
+                ),
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Log-Ridge": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler(cols=[
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                    "hour", "dow", "month",
+                    "prev_stop_delay",
+                    "dist_to_prev_stop",
+                ]),
+            ],
+            model=LogTargetModel(
+                model=RidgeModel(alpha=2.882),
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Log-XGB": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+            ],
+            model=LogTargetModel(
+                model=XGBoostModel(
+                    n_estimators=1102,
+                    learning_rate=0.02089,
+                    max_depth=7,
+                    min_child_weight=6.068,
+                    gamma=0.000983,
+                    subsample=0.9602,
+                    colsample_bytree=0.6652,
+                    colsample_bylevel=0.9709,
+                    reg_alpha=0.7871,
+                    reg_lambda=5.793,
+                    early_stopping_rounds=50,
+                ),
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Hier-LGBM-LGBM": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler([
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                ]),
+            ],
+            model=HierarchicalRegressor(
+                classifier=LightGBMClassifierModel(
+                    n_estimators=500,
+                    learning_rate=0.05,
+                    num_leaves=63,
+                    min_child_samples=100,
+                    subsample=0.8,
+                    colsample_bytree=0.7,
+                    reg_alpha=0.1,
+                    reg_lambda=0.1,
+                ),
+                regressor=LightGBMModel(
+                    n_estimators=1062,
+                    learning_rate=0.01103,
+                    num_leaves=65,
+                    min_child_samples=76,
+                    min_sum_hessian_in_leaf=0.1572,
+                    subsample=0.9314,
+                    subsample_freq=1,
+                    colsample_bytree=0.5783,
+                    feature_fraction_bynode=0.8145,
+                    reg_alpha=0.001796,
+                    reg_lambda=0.2327,
+                    path_smooth=1.373,
+                    early_stopping_rounds=50,
+                ),
+                binner=DelayBinner(bins=[60, 120, 300]),
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Hier-LGBM-Ridge": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler([
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                    "hour", "dow", "month",
+                    "prev_stop_delay",
+                    "dist_to_prev_stop",
+                ]),
+            ],
+            model=HierarchicalRegressor(
+                classifier=LightGBMClassifierModel(
+                    n_estimators=500,
+                    learning_rate=0.05,
+                    num_leaves=63,
+                    min_child_samples=100,
+                    subsample=0.8,
+                    colsample_bytree=0.7,
+                    reg_alpha=0.1,
+                    reg_lambda=0.1,
+                ),
+                regressor=RidgeModel(alpha=2.882),
+                binner=DelayBinner(bins=[60, 120, 300]),
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Hier-LGBM-XGB": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler([
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                ]),
+            ],
+            model=HierarchicalRegressor(
+                classifier=LightGBMClassifierModel(
+                    n_estimators=500,
+                    learning_rate=0.05,
+                    num_leaves=63,
+                    min_child_samples=100,
+                    subsample=0.8,
+                    colsample_bytree=0.7,
+                    reg_alpha=0.1,
+                    reg_lambda=0.1,
+                ),
+                regressor=XGBoostModel(
+                    n_estimators=1102,
+                    learning_rate=0.02089,
+                    max_depth=7,
+                    min_child_weight=6.068,
+                    gamma=0.000983,
+                    subsample=0.9602,
+                    colsample_bytree=0.6652,
+                    colsample_bylevel=0.9709,
+                    reg_alpha=0.7871,
+                    reg_lambda=5.793,
+                    early_stopping_rounds=50,
+                ),
+                binner=DelayBinner(bins=[60, 120, 300]),
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Stack-LGBM-XGB-CB": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+            ],
+            model=StackingModel(
+                base_models=[
+                    LightGBMModel(
+                        n_estimators=500,
+                        learning_rate=0.05,
+                        num_leaves=63,
+                        min_child_samples=100,
+                        subsample=0.8,
+                        colsample_bytree=0.7,
+                        reg_alpha=0.1,
+                        reg_lambda=0.1,
+                    ),
+                    XGBoostModel(
+                        n_estimators=300,
+                        learning_rate=0.05,
+                        max_depth=6,
+                        subsample=0.8,
+                        colsample_bytree=0.8,
+                        reg_alpha=0.1,
+                        reg_lambda=1.0,
+                    ),
+                    CatBoostModel(
+                        n_estimators=300,
+                        learning_rate=0.05,
+                        depth=6,
+                    ),
+                ],
+                meta_model=RidgeModel(alpha=1.0),
+                n_folds=5,
+            ),
+        ),
+        evaluator=evaluator,
+    ),
+    "Stack-LGBM-CB": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+            ],
+            model=StackingModel(
+                base_models=[
+                    LightGBMModel(
+                        n_estimators=500,
+                        learning_rate=0.05,
+                        num_leaves=63,
+                        min_child_samples=100,
+                        subsample=0.8,
+                        colsample_bytree=0.7,
+                        reg_alpha=0.1,
+                        reg_lambda=0.1,
+                    ),
+                    CatBoostModel(
+                        n_estimators=300,
+                        learning_rate=0.05,
+                        depth=6,
+                    ),
+                ],
+                meta_model=RidgeModel(alpha=1.0),
+                n_folds=5,
+            ),
+        ),
+        evaluator=evaluator,
+    ),
 }
 
 

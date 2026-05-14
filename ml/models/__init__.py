@@ -7,8 +7,13 @@ from ml.models.catboost_classifier import CatBoostClassifierModel
 from ml.models.ridge import RidgeModel
 from ml.models.logistic_regression import LogisticRegressionModel
 from ml.models.random_forest_classifier import RandomForestClassifierModel
+from ml.models.random_forest_regressor import RandomForestRegressorModel
 from ml.models.stacking import StackingModel
+from ml.models.residual_stacking import ResidualStackingModel
+from ml.models.log_target import LogTargetModel
+from ml.models.hierarchical import HierarchicalRegressor
 from ml.models.classification_stacking import ClassificationStackingModel
 from ml.models.ordinal_classifier import OrdinalClassifierModel
+from ml.models.ordinal_regressor import OrdinalRegressorModel
 from ml.models.pipelined_classifier import PipelinedClassifierModel
 from ml.models.mlp_classifier import MLPClassifierModel

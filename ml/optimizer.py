@@ -1,6 +1,7 @@
 from typing import List, Optional
+import numpy as np
 import optuna
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, mean_squared_error
 from sklearn.model_selection import train_test_split
 from ml.data import DataLoader
 from ml.models.lgbm import LightGBMModel
@@ -10,6 +11,8 @@ from ml.models.xgboost_classifier import XGBoostClassifierModel
 from ml.models.catboost_model import CatBoostModel
 from ml.models.catboost_classifier import CatBoostClassifierModel
 from ml.models.random_forest_classifier import RandomForestClassifierModel
+from ml.models.random_forest_regressor import RandomForestRegressorModel
+from ml.models.ridge import RidgeModel
 from ml.models.mlp_classifier import MLPClassifierModel
 from ml.pipeline import MLPipeline
 from ml.preprocessors.base import BasePreprocessor
@@ -23,18 +26,24 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 
 class LGBMRegressorOptimizer:
+    """Bayesian hyperparameter search for LightGBMModel, minimising RMSE.
+
+    Uses an explicit inner train/val split so preprocessors are fitted only
+    on the inner train portion, mirroring the classifier optimisation pattern.
+    """
+
     def __init__(
         self,
         loader: DataLoader,
-        numeric_cols: List[str],
+        preprocessors: List[BasePreprocessor] | None = None,
         n_trials: int = 100,
-        n_estimators: int = 3000,
+        n_estimators: int = 2000,
         early_stopping_rounds: int = 50,
-        val_fraction: float = 0.1,
+        val_fraction: float = 0.15,
         seed: Optional[int] = 42,
     ):
         self.loader = loader
-        self.numeric_cols = numeric_cols
+        self.preprocessors = preprocessors or [TemporalFeatureExtractor()]
         self.n_trials = n_trials
         self.n_estimators = n_estimators
         self.early_stopping_rounds = early_stopping_rounds
@@ -48,12 +57,24 @@ class LGBMRegressorOptimizer:
         return self._data
 
     def _objective(self, trial: optuna.Trial) -> float:
-        X_train, _, y_train, _ = self._load_once()
+        X_train_full, _, y_train_full, _ = self._load_once()
+
+        X_tr, X_val, y_tr, y_val = train_test_split(
+            X_train_full, y_train_full,
+            test_size=self.val_fraction, random_state=trial.number,
+        )
+
+        X_tr_proc = X_tr.copy()
+        for p in self.preprocessors:
+            X_tr_proc = p.fit_transform(X_tr_proc, y_tr)
+        X_val_proc = X_val.copy()
+        for p in self.preprocessors:
+            X_val_proc = p.transform(X_val_proc)
 
         model = LightGBMModel(
             n_estimators=trial.suggest_int("n_estimators", 100, self.n_estimators),
             early_stopping_rounds=self.early_stopping_rounds,
-            val_fraction=self.val_fraction,
+            val_fraction=0.1,
             learning_rate=trial.suggest_float("learning_rate", 0.005, 0.1, log=True),
             num_leaves=trial.suggest_int("num_leaves", 20, 300),
             min_child_samples=trial.suggest_int("min_child_samples", 10, 200),
@@ -66,12 +87,9 @@ class LGBMRegressorOptimizer:
             reg_lambda=trial.suggest_float("reg_lambda", 1e-4, 10.0, log=True),
             path_smooth=trial.suggest_float("path_smooth", 0.0, 10.0),
         )
-        pipeline = MLPipeline(
-            preprocessors=[WeatherFeatureEngineer(), FeatureScaler(cols=self.numeric_cols), TemporalFeatureExtractor()],
-            model=model,
-        )
-        pipeline.fit(X_train, y_train)
-        return model._model.best_score_["valid_0"]["rmse"]
+        model.fit(X_tr_proc, y_tr)
+        preds = model.predict(X_val_proc)
+        return np.sqrt(mean_squared_error(y_val, preds))
 
     def optimize(self) -> optuna.Study:
         sampler = optuna.samplers.TPESampler(seed=self.seed)
@@ -187,18 +205,24 @@ class LGBMClassifierOptimizer:
 
 
 class XGBoostRegressorOptimizer:
+    """Bayesian hyperparameter search for XGBoostModel, minimising RMSE.
+
+    Uses an explicit inner train/val split so preprocessors are fitted only
+    on the inner train portion, mirroring the classifier optimisation pattern.
+    """
+
     def __init__(
         self,
         loader: DataLoader,
-        numeric_cols: List[str],
+        preprocessors: List[BasePreprocessor] | None = None,
         n_trials: int = 100,
         n_estimators: int = 2000,
         early_stopping_rounds: int = 50,
-        val_fraction: float = 0.1,
+        val_fraction: float = 0.15,
         seed: Optional[int] = 42,
     ):
         self.loader = loader
-        self.numeric_cols = numeric_cols
+        self.preprocessors = preprocessors or [TemporalFeatureExtractor()]
         self.n_trials = n_trials
         self.n_estimators = n_estimators
         self.early_stopping_rounds = early_stopping_rounds
@@ -212,12 +236,24 @@ class XGBoostRegressorOptimizer:
         return self._data
 
     def _objective(self, trial: optuna.Trial) -> float:
-        X_train, _, y_train, _ = self._load_once()
+        X_train_full, _, y_train_full, _ = self._load_once()
+
+        X_tr, X_val, y_tr, y_val = train_test_split(
+            X_train_full, y_train_full,
+            test_size=self.val_fraction, random_state=trial.number,
+        )
+
+        X_tr_proc = X_tr.copy()
+        for p in self.preprocessors:
+            X_tr_proc = p.fit_transform(X_tr_proc, y_tr)
+        X_val_proc = X_val.copy()
+        for p in self.preprocessors:
+            X_val_proc = p.transform(X_val_proc)
 
         model = XGBoostModel(
             n_estimators=trial.suggest_int("n_estimators", 100, self.n_estimators),
             early_stopping_rounds=self.early_stopping_rounds,
-            val_fraction=self.val_fraction,
+            val_fraction=0.1,
             learning_rate=trial.suggest_float("learning_rate", 0.005, 0.1, log=True),
             max_depth=trial.suggest_int("max_depth", 3, 12),
             min_child_weight=trial.suggest_float("min_child_weight", 1.0, 100.0, log=True),
@@ -228,12 +264,9 @@ class XGBoostRegressorOptimizer:
             reg_alpha=trial.suggest_float("reg_alpha", 1e-4, 10.0, log=True),
             reg_lambda=trial.suggest_float("reg_lambda", 1e-4, 10.0, log=True),
         )
-        pipeline = MLPipeline(
-            preprocessors=[FeatureScaler(cols=self.numeric_cols), TemporalFeatureExtractor()],
-            model=model,
-        )
-        pipeline.fit(X_train, y_train)
-        return model._model.best_score
+        model.fit(X_tr_proc, y_tr)
+        preds = model.predict(X_val_proc)
+        return np.sqrt(mean_squared_error(y_val, preds))
 
     def optimize(self) -> optuna.Study:
         sampler = optuna.samplers.TPESampler(seed=self.seed)
@@ -438,18 +471,24 @@ class OrdinalXGBoostClassifierOptimizer:
 
 
 class CatBoostRegressorOptimizer:
+    """Bayesian hyperparameter search for CatBoostModel, minimising RMSE.
+
+    Uses an explicit inner train/val split so preprocessors are fitted only
+    on the inner train portion, mirroring the classifier optimisation pattern.
+    """
+
     def __init__(
         self,
         loader: DataLoader,
-        numeric_cols: List[str],
+        preprocessors: List[BasePreprocessor] | None = None,
         n_trials: int = 100,
         n_estimators: int = 2000,
         early_stopping_rounds: int = 50,
-        val_fraction: float = 0.1,
+        val_fraction: float = 0.15,
         seed: Optional[int] = 42,
     ):
         self.loader = loader
-        self.numeric_cols = numeric_cols
+        self.preprocessors = preprocessors or [TemporalFeatureExtractor()]
         self.n_trials = n_trials
         self.n_estimators = n_estimators
         self.early_stopping_rounds = early_stopping_rounds
@@ -463,12 +502,24 @@ class CatBoostRegressorOptimizer:
         return self._data
 
     def _objective(self, trial: optuna.Trial) -> float:
-        X_train, _, y_train, _ = self._load_once()
+        X_train_full, _, y_train_full, _ = self._load_once()
+
+        X_tr, X_val, y_tr, y_val = train_test_split(
+            X_train_full, y_train_full,
+            test_size=self.val_fraction, random_state=trial.number,
+        )
+
+        X_tr_proc = X_tr.copy()
+        for p in self.preprocessors:
+            X_tr_proc = p.fit_transform(X_tr_proc, y_tr)
+        X_val_proc = X_val.copy()
+        for p in self.preprocessors:
+            X_val_proc = p.transform(X_val_proc)
 
         model = CatBoostModel(
             n_estimators=trial.suggest_int("n_estimators", 100, self.n_estimators),
             early_stopping_rounds=self.early_stopping_rounds,
-            val_fraction=self.val_fraction,
+            val_fraction=0.1,
             learning_rate=trial.suggest_float("learning_rate", 0.005, 0.1, log=True),
             depth=trial.suggest_int("depth", 4, 12),
             l2_leaf_reg=trial.suggest_float("l2_leaf_reg", 1e-2, 10.0, log=True),
@@ -476,12 +527,150 @@ class CatBoostRegressorOptimizer:
             bagging_temperature=trial.suggest_float("bagging_temperature", 0.0, 1.0),
             min_data_in_leaf=trial.suggest_int("min_data_in_leaf", 1, 100),
         )
-        pipeline = MLPipeline(
-            preprocessors=[FeatureScaler(cols=self.numeric_cols), TemporalFeatureExtractor()],
-            model=model,
+        model.fit(X_tr_proc, y_tr)
+        preds = model.predict(X_val_proc)
+        return np.sqrt(mean_squared_error(y_val, preds))
+
+    def optimize(self) -> optuna.Study:
+        sampler = optuna.samplers.TPESampler(seed=self.seed)
+        study = optuna.create_study(direction="minimize", sampler=sampler)
+        try:
+            study.optimize(
+                self._objective,
+                n_trials=self.n_trials,
+                show_progress_bar=True,
+            )
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user. Printing best results found so far...")
+
+        print(f"\nBest RMSE: {study.best_value:.4f}s")
+        print("Best params:")
+        for k, v in study.best_params.items():
+            print(f"  {k}: {v}")
+
+        return study
+
+
+class RandomForestRegressorOptimizer:
+    """Bayesian hyperparameter search for RandomForestRegressorModel, minimising RMSE.
+
+    Random Forest does not benefit from early stopping, so n_estimators is tuned
+    directly without a per-iteration validation overhead.
+    """
+
+    def __init__(
+        self,
+        loader: DataLoader,
+        preprocessors: List[BasePreprocessor] | None = None,
+        n_trials: int = 100,
+        n_estimators: int = 1000,
+        val_fraction: float = 0.15,
+        seed: Optional[int] = 42,
+    ):
+        self.loader = loader
+        self.preprocessors = preprocessors or [TemporalFeatureExtractor()]
+        self.n_trials = n_trials
+        self.n_estimators = n_estimators
+        self.val_fraction = val_fraction
+        self.seed = seed
+        self._data = None
+
+    def _load_once(self):
+        if self._data is None:
+            self._data = self.loader.load()
+        return self._data
+
+    def _objective(self, trial: optuna.Trial) -> float:
+        X_train_full, _, y_train_full, _ = self._load_once()
+
+        X_tr, X_val, y_tr, y_val = train_test_split(
+            X_train_full, y_train_full,
+            test_size=self.val_fraction, random_state=trial.number,
         )
-        pipeline.fit(X_train, y_train)
-        return model._model.get_best_score()["validation"]["RMSE"]
+
+        X_tr_proc = X_tr.copy()
+        for p in self.preprocessors:
+            X_tr_proc = p.fit_transform(X_tr_proc, y_tr)
+        X_val_proc = X_val.copy()
+        for p in self.preprocessors:
+            X_val_proc = p.transform(X_val_proc)
+
+        model = RandomForestRegressorModel(
+            n_estimators=trial.suggest_int("n_estimators", 100, self.n_estimators),
+            max_depth=trial.suggest_int("max_depth", 5, 30),
+            min_samples_split=trial.suggest_int("min_samples_split", 2, 20),
+            min_samples_leaf=trial.suggest_int("min_samples_leaf", 1, 10),
+            max_features=trial.suggest_categorical("max_features", [0.5, "sqrt", 0.8]),
+            bootstrap=True,
+        )
+        model.fit(X_tr_proc, y_tr)
+        preds = model.predict(X_val_proc)
+        return np.sqrt(mean_squared_error(y_val, preds))
+
+    def optimize(self) -> optuna.Study:
+        sampler = optuna.samplers.TPESampler(seed=self.seed)
+        study = optuna.create_study(direction="minimize", sampler=sampler)
+        try:
+            study.optimize(
+                self._objective,
+                n_trials=self.n_trials,
+                show_progress_bar=True,
+            )
+        except KeyboardInterrupt:
+            print("\nOptimization interrupted by user. Printing best results found so far...")
+
+        print(f"\nBest RMSE: {study.best_value:.4f}s")
+        print("Best params:")
+        for k, v in study.best_params.items():
+            print(f"  {k}: {v}")
+
+        return study
+
+
+class RidgeRegressorOptimizer:
+    """Bayesian hyperparameter search for RidgeModel, minimising RMSE."""
+
+    def __init__(
+        self,
+        loader: DataLoader,
+        preprocessors: List[BasePreprocessor] | None = None,
+        n_trials: int = 50,
+        val_fraction: float = 0.15,
+        seed: Optional[int] = 42,
+    ):
+        self.loader = loader
+        self.preprocessors = preprocessors or [TemporalFeatureExtractor(), FeatureScaler()]
+        self.n_trials = n_trials
+        self.val_fraction = val_fraction
+        self.seed = seed
+        self._data = None
+
+    def _load_once(self):
+        if self._data is None:
+            self._data = self.loader.load()
+        return self._data
+
+    def _objective(self, trial: optuna.Trial) -> float:
+        X_train_full, _, y_train_full, _ = self._load_once()
+
+        X_tr, X_val, y_tr, y_val = train_test_split(
+            X_train_full, y_train_full,
+            test_size=self.val_fraction, random_state=trial.number,
+        )
+
+        X_tr_proc = X_tr.copy()
+        for p in self.preprocessors:
+            X_tr_proc = p.fit_transform(X_tr_proc, y_tr)
+        X_val_proc = X_val.copy()
+        for p in self.preprocessors:
+            X_val_proc = p.transform(X_val_proc)
+
+        model = RidgeModel(
+            alpha=trial.suggest_float("alpha", 0.01, 100.0, log=True),
+        )
+        model.fit(X_tr_proc, y_tr)
+        preds = model.predict(X_val_proc)
+        return np.sqrt(mean_squared_error(y_val, preds))
 
     def optimize(self) -> optuna.Study:
         sampler = optuna.samplers.TPESampler(seed=self.seed)

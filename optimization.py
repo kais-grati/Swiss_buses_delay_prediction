@@ -1,5 +1,6 @@
 from ml.optimizer import (
     LGBMRegressorOptimizer, XGBoostRegressorOptimizer, CatBoostRegressorOptimizer,
+    RandomForestRegressorOptimizer, RidgeRegressorOptimizer,
     LGBMClassifierOptimizer, OrdinalLGBMClassifierOptimizer,
     OrdinalXGBoostClassifierOptimizer,
     XGBoostClassifierOptimizer, CatBoostClassifierOptimizer,
@@ -186,8 +187,85 @@ def run_optimization():
             FeatureScaler([
                 "temperature", "precipitation", "sunshine", "humidity",
                 "wind", "pressure", "snow_depth", "prev_stop_delay",
+                "dist_to_prev_stop",
                 "hour", "dow", "month",
             ]),
         ]
     )
     # study = optimizer.optimize()
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # REGRESSION OPTIMIZERS
+    # ═══════════════════════════════════════════════════════════════════════════════
+    console.print("\n", Panel("[bold green]REGRESSION OPTUNA OPTIMIZATION[/bold green]", expand=False))
+
+    # ── LightGBM Regressor Optimizer ────────────────────────────────────────────
+    lgbm_reg_opt = LGBMRegressorOptimizer(
+        loader=loader_lag,
+        n_trials=60,
+        n_estimators=2000,
+        preprocessors=[
+            TemporalFeatureExtractor(),
+            WindMerger(),
+            StringEncoder(cols=["operator", "line"]),
+        ],
+    )
+    lgbm_reg_study = lgbm_reg_opt.optimize()
+
+    # ── XGBoost Regressor Optimizer ─────────────────────────────────────────────
+    xgb_reg_opt = XGBoostRegressorOptimizer(
+        loader=loader_lag,
+        n_trials=60,
+        n_estimators=2000,
+        preprocessors=[
+            TemporalFeatureExtractor(),
+            WindMerger(),
+            StringEncoder(cols=["operator", "line"]),
+        ],
+    )
+    xgb_reg_study = xgb_reg_opt.optimize()
+
+    # ── CatBoost Regressor Optimizer ────────────────────────────────────────────
+    cb_reg_opt = CatBoostRegressorOptimizer(
+        loader=loader_lag,
+        n_trials=40,
+        n_estimators=2000,
+        preprocessors=[
+            TemporalFeatureExtractor(),
+            WindMerger(),
+            StringEncoder(cols=["operator", "line"]),
+        ],
+    )
+    cb_reg_study = cb_reg_opt.optimize()
+
+    # ── RandomForest Regressor Optimizer ────────────────────────────────────────
+    rf_reg_opt = RandomForestRegressorOptimizer(
+        loader=loader_lag,
+        n_trials=40,
+        n_estimators=1000,
+        preprocessors=[
+            TemporalFeatureExtractor(),
+            WindMerger(),
+            StringEncoder(cols=["operator", "line"]),
+        ],
+    )
+    rf_reg_study = rf_reg_opt.optimize()
+
+    # ── Ridge Regressor Optimizer ───────────────────────────────────────────────
+    ridge_reg_opt = RidgeRegressorOptimizer(
+        loader=loader_lag,
+        n_trials=30,
+        preprocessors=[
+            TemporalFeatureExtractor(),
+            WindMerger(),
+            StringEncoder(cols=["operator", "line"]),
+            FeatureScaler([
+                "temperature", "precipitation", "sunshine", "humidity",
+                "wind", "pressure", "snow_depth",
+                "hour", "dow", "month",
+                "prev_stop_delay",
+                "dist_to_prev_stop",
+            ]),
+        ],
+    )
+    ridge_reg_study = ridge_reg_opt.optimize()

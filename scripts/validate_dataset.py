@@ -73,6 +73,24 @@ def test_schema(cols: set, has_weather: bool):
     else:
         skip("Weather columns present", "file has no weather columns")
 
+    has_traffic = "traffic_dtv" in cols
+    traffic_cols = {"traffic_dtv", "traffic_peak", "traffic_heavy_share", "traffic_peak_ratio"}
+    if has_traffic:
+        missing_t = traffic_cols - cols
+        check("All traffic columns present", not missing_t,
+              f"missing: {missing_t}" if missing_t else "")
+    else:
+        skip("Traffic columns present", "file has no traffic columns")
+
+    has_prev_stop = "prev_stop_delay" in cols
+    prev_stop_cols = {"prev_stop_delay", "dist_to_prev_stop", "trip_stop_index"}
+    if has_prev_stop:
+        missing_p = prev_stop_cols - cols
+        check("prev_stop_delay + dist_to_prev_stop present", not missing_p,
+              f"missing: {missing_p}" if missing_p else "")
+    else:
+        skip("prev_stop columns present", "file has no prev_stop_delay")
+
 
 def test_completeness(cols: set, n_rows: int, has_weather: bool):
     print("\n── Completeness / NaN rates ──────────────────────────────────────────")
@@ -111,6 +129,29 @@ def test_completeness(cols: set, n_rows: int, has_weather: bool):
             # Up to ~20% NaN is expected for some stations
             check(f"{col} null rate < 25%", rate < 25, f"{rate:.1f}% null",
                   warn_only=rate < 50)
+
+    # Prev stop features — NaN expected for first stop of each trip.
+    # dist_to_prev_stop NaNs are a known pre-existing issue (see memory obs 571).
+    for col, warn_pct in (("prev_stop_delay", 50), ("dist_to_prev_stop", 95)):
+        if col not in cols:
+            continue
+        rate = q(f"SELECT COUNT(*) FROM df WHERE {col} IS NULL") / n_rows * 100
+        check(f"{col} null rate < {warn_pct}%", rate < warn_pct,
+              f"{rate:.1f}% null", warn_only=True)
+
+    # trip_stop_index should have 0 NaN (computed for all rows, first stops filtered)
+    if "trip_stop_index" in cols:
+        tsi_nulls = q("SELECT COUNT(*) FROM df WHERE trip_stop_index IS NULL")
+        check("No NaN in trip_stop_index", tsi_nulls == 0,
+              f"{tsi_nulls:,} nulls" if tsi_nulls else "")
+
+    # Traffic features — should be 0 NaN (rows without traffic are now filtered out)
+    for col in ("traffic_dtv", "traffic_peak", "traffic_heavy_share", "traffic_peak_ratio"):
+        if col not in cols:
+            continue
+        nulls = q(f"SELECT COUNT(*) FROM df WHERE {col} IS NULL")
+        check(f"No NaN in {col}", nulls == 0, f"{nulls:,} nulls" if nulls else "",
+              warn_only=nulls / n_rows * 100 < 5)
 
 
 def test_ranges(cols: set, n_rows: int, has_weather: bool):
@@ -171,6 +212,82 @@ def test_ranges(cols: set, n_rows: int, has_weather: bool):
             """)
             check(f"{col} in [{lo}, {hi}]", bad == 0,
                   f"{bad:,} out-of-range" if bad else "", warn_only=warn_only)
+
+    # Prev stop features
+    if "prev_stop_delay" in cols:
+        bad_psd = q("""
+            SELECT COUNT(*) FROM df
+            WHERE prev_stop_delay IS NOT NULL
+              AND (prev_stop_delay < -43200 OR prev_stop_delay > 43200)
+        """)
+        check("prev_stop_delay within ±12h", bad_psd == 0,
+              f"{bad_psd:,} out-of-range" if bad_psd else "")
+
+    if "dist_to_prev_stop" in cols:
+        bad_dist = q("""
+            SELECT COUNT(*) FROM df
+            WHERE dist_to_prev_stop IS NOT NULL
+              AND (dist_to_prev_stop < 0 OR dist_to_prev_stop > 100000)
+        """)
+        check("dist_to_prev_stop in [0, 100km]", bad_dist == 0,
+              f"{bad_dist:,} out-of-range" if bad_dist else "")
+
+    if "trip_stop_index" in cols:
+        bad_tsi = q("""
+            SELECT COUNT(*) FROM df
+            WHERE trip_stop_index IS NOT NULL
+              AND (trip_stop_index < 0 OR trip_stop_index >= 500)
+        """)
+        check("trip_stop_index in [0, 500)", bad_tsi == 0,
+              f"{bad_tsi:,} out-of-range" if bad_tsi else "")
+
+    # Traffic features
+    if "traffic_dtv" in cols:
+        bad_dtv = q("""
+            SELECT COUNT(*) FROM df
+            WHERE traffic_dtv IS NOT NULL AND traffic_dtv < 0
+        """)
+        zero_dtv = q("""
+            SELECT COUNT(*) FROM df WHERE traffic_dtv = 0
+        """)
+        check("traffic_dtv >= 0", bad_dtv == 0,
+              f"{bad_dtv:,} negative" if bad_dtv else "")
+        if zero_dtv > 0:
+            check("traffic_dtv > 0 (non-zero)", zero_dtv == 0,
+                  f"{zero_dtv:,} zeros ({zero_dtv / n_rows * 100:.2f}%)", warn_only=True)
+
+    if "traffic_peak" in cols:
+        bad_tp = q("""
+            SELECT COUNT(*) FROM df
+            WHERE traffic_peak IS NOT NULL AND traffic_peak < 0
+        """)
+        zero_tp = q("""
+            SELECT COUNT(*) FROM df WHERE traffic_peak = 0
+        """)
+        check("traffic_peak >= 0", bad_tp == 0,
+              f"{bad_tp:,} negative" if bad_tp else "")
+        if zero_tp > 0:
+            check("traffic_peak > 0 (non-zero)", zero_tp == 0,
+                  f"{zero_tp:,} zeros ({zero_tp / n_rows * 100:.2f}%)", warn_only=True)
+
+    if "traffic_heavy_share" in cols:
+        bad = q("""
+            SELECT COUNT(*) FROM df
+            WHERE traffic_heavy_share IS NOT NULL
+              AND (traffic_heavy_share < 0 OR traffic_heavy_share > 1.0)
+        """)
+        check("traffic_heavy_share in [0, 1.0]", bad == 0,
+              f"{bad:,} out-of-range" if bad else "")
+
+    if "traffic_peak_ratio" in cols:
+        # peak_ratio = ASP / DTV — can exceed 1 for roads where peak > daily average
+        bad = q("""
+            SELECT COUNT(*) FROM df
+            WHERE traffic_peak_ratio IS NOT NULL
+              AND (traffic_peak_ratio < 0 OR traffic_peak_ratio > 2.0)
+        """)
+        check("traffic_peak_ratio in [0, 2.0]", bad == 0,
+              f"{bad:,} out-of-range" if bad else "", warn_only=True)
 
 
 def test_distributions(n_rows: int):
@@ -257,6 +374,37 @@ def test_weather_join(cols: set, n_rows: int):
     check("Temperature has non-trivial variance (stddev > 1°C)", temp_std > 1.0,
           f"stddev = {temp_std:.2f}°C")
 
+
+def test_traffic_join(cols: set, n_rows: int):
+    print("\n── Traffic join quality ───────────────────────────────────────────────")
+
+    # All rows should have traffic data (INNER JOIN semantics)
+    matched = q("SELECT COUNT(*) FROM df WHERE traffic_dtv IS NOT NULL")
+    rate = matched / n_rows * 100
+    check("Traffic join hit rate = 100%", rate == 100,
+          f"{rate:.1f}% rows have traffic ({n_rows - matched:,} missing)")
+
+    # Traffic values should not be uniform
+    dtv_std = q("SELECT STDDEV(traffic_dtv) FROM df WHERE traffic_dtv IS NOT NULL")
+    check("traffic_dtv has non-trivial variance (stddev > 100)",
+          dtv_std > 100, f"stddev = {dtv_std:.0f} vehicles")
+
+    # heavy_share should have real variation (not all zeros)
+    hs_mean = q("SELECT AVG(traffic_heavy_share) FROM df")
+    check("traffic_heavy_share mean > 0.01", hs_mean > 0.01,
+          f"mean = {hs_mean:.4f}", warn_only=True)
+
+    # peak_ratio most values should be non-zero
+    pr_zero = q("SELECT COUNT(*) FROM df WHERE traffic_peak_ratio = 0") / n_rows * 100
+    check("traffic_peak_ratio non-zero for > 90%", pr_zero < 10,
+          f"{pr_zero:.1f}% zeros")
+
+    # Distinct stop-level traffic values (should be >2000 different values for 18k stops)
+    n_dtv = q("SELECT COUNT(DISTINCT traffic_dtv) FROM df")
+    check("> 2,000 distinct traffic_dtv values", n_dtv > 2000,
+          f"only {n_dtv:,} distinct values" if n_dtv <= 2000 else "")
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def main():
@@ -266,6 +414,10 @@ def main():
 
     if args.file:
         target = Path(args.file)
+    elif (_DATA / "swiss_bus_2025_weather_traffic.parquet").exists():
+        target = _DATA / "swiss_bus_2025_weather_traffic.parquet"
+    elif (_DATA / "swiss_bus_2025_weather.parquet").exists():
+        target = _DATA / "swiss_bus_2025_weather.parquet"
     elif (_DATA / "dataset_with_weather.parquet").exists():
         target = _DATA / "dataset_with_weather.parquet"
     elif (_DATA / "dataset.parquet").exists():
@@ -285,10 +437,14 @@ def main():
     n_rows = q("SELECT COUNT(*) FROM df")
     cols   = set(qdf("DESCRIBE df")["column_name"].tolist())
     has_weather = "temperature" in cols
+    has_traffic = "traffic_dtv" in cols
+    has_prev_stop = "prev_stop_delay" in cols
 
     print(f"\n  Rows:    {n_rows:,}")
     print(f"  Columns: {len(cols)}")
     print(f"  Weather: {'yes' if has_weather else 'no'}")
+    print(f"  Traffic: {'yes' if has_traffic else 'no'}")
+    print(f"  PrevStop: {'yes' if has_prev_stop else 'no'}")
 
     # Run all test groups
     test_schema(cols, has_weather)
@@ -298,6 +454,8 @@ def main():
     test_consistency()
     if has_weather:
         test_weather_join(cols, n_rows)
+    if has_traffic:
+        test_traffic_join(cols, n_rows)
 
     # Summary
     n_pass = sum(1 for _, r in results if r == "PASS")

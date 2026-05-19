@@ -1,0 +1,58 @@
+{
+  "dataset": "705",
+  "bins": [
+    60,
+    120,
+    300
+  ],
+  "results": {
+    "LGBM": {
+      "val_f1": 0.741027267331854,
+      "test_f1": 0.7462034915235596,
+      "params": {
+        "n_estimators": 655,
+        "scale_pos_weight": 0.38630795508567267,
+        "learning_rate": 0.019603369861210685,
+        "num_leaves": 161,
+        "min_child_samples": 20,
+        "min_sum_hessian_in_leaf": 0.0037253938395788847,
+        "subsample": 0.7554487413172255,
+        "colsample_bytree": 0.42787024763199866,
+        "feature_fraction_bynode": 0.764526911140863,
+        "reg_alpha": 0.0007122305833333872,
+        "reg_lambda": 0.00021147447960615738
+      }
+    },
+    "XGBoost": {
+      "val_f1": 0.7376132818956688,
+      "test_f1": 0.7423489327346693,
+      "params": {
+        "n_estimators": 655,
+        "scale_pos_weight": 0.38630795508567267,
+        "learning_rate": 0.019603369861210685,
+        "max_depth": 10,
+        "min_child_weight": 2.5081156860452323,
+        "gamma": 0.02608388046560993,
+        "subsample": 0.7554487413172255,
+        "colsample_bytree": 0.42787024763199866,
+        "colsample_bylevel": 0.764526911140863,
+        "reg_alpha": 0.0007122305833333872,
+        "reg_lambda": 0.00021147447960615738
+      }
+    },
+    "CatBoost": {
+      "val_f1": 0.7487827691934754,
+      "test_f1": 0.7567751499853144,
+      "params": {
+        "n_estimators": 1263,
+        "auto_class_weights": null,
+        "learning_rate": 0.019603369861210685,
+        "depth": 11,
+        "l2_leaf_reg": 0.039721107273819126,
+        "random_strength": 0.34890188454913873,
+        "bagging_temperature": 0.5924145688620425,
+        "min_data_in_leaf": 5
+      }
+    }
+  }
+}

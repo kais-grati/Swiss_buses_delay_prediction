@@ -8,7 +8,7 @@ import os
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-SRC = "data/dataset_with_weather.parquet"
+SRC = "data/swiss_bus_2026_weather.parquet"
 TMP = "data/dataset_with_weather.parquet.tmp"
 
 print("Dropping rows with missing prev_stop_delay...")

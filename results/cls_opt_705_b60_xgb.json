@@ -1,0 +1,25 @@
+{
+  "dataset": "705",
+  "bins": [
+    60
+  ],
+  "results": {
+    "XGBoost": {
+      "val_f1": 0.8322732116384335,
+      "test_f1": 0.8530683776258257,
+      "params": {
+        "n_estimators": 1301,
+        "scale_pos_weight": 1.1153316173863392,
+        "learning_rate": 0.028830534076018186,
+        "max_depth": 9,
+        "min_child_weight": 5.729519026792599,
+        "gamma": 0.00010336673458236572,
+        "subsample": 0.923597143556917,
+        "colsample_bytree": 0.995124093627859,
+        "colsample_bylevel": 0.42799379768761947,
+        "reg_alpha": 2.267332126476616,
+        "reg_lambda": 0.00016547318822006306
+      }
+    }
+  }
+}

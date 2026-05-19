@@ -33,6 +33,9 @@ class DataLoader:
         else:
             df = pq.read_table(self.path).to_pandas()
         df = df.drop(columns=[c for c in self.drop_cols if c in df.columns])
+        df = df.dropna(subset=[self.target])
+        if "dist_to_prev_stop" in df.columns:
+            df["dist_to_prev_stop"] = df["dist_to_prev_stop"].fillna(0.0)
         X = df if self.keep_target_in_X else df.drop(columns=[self.target])
         y = df[self.target]
         if self.test_size <= 0:

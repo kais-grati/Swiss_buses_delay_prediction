@@ -325,3 +325,52 @@
 {"timestamp": "2026-05-14T22:35:51", "name": "RandomForest", "kind": "regression", "mse": 936.1411, "rmse": 30.5964, "r2": 0.8852}
 {"timestamp": "2026-05-14T22:35:53", "name": "Ridge", "kind": "regression", "mse": 1916.9019, "rmse": 43.7824, "r2": 0.7649}
 {"timestamp": "2026-05-14T22:35:55", "name": "Ridge-PCA", "kind": "regression", "mse": 8152.4535, "rmse": 90.2909, "r2": 0.0001}
+{"timestamp": "2026-05-16T20:08:49", "name": "LightGBM", "kind": "regression", "mse": 2496.2186, "rmse": 49.9622, "r2": 0.8095}
+{"timestamp": "2026-05-16T20:08:52", "name": "XGBoost", "kind": "regression", "mse": 2503.6042, "rmse": 50.036, "r2": 0.8089}
+{"timestamp": "2026-05-16T20:09:08", "name": "CatBoost", "kind": "regression", "mse": 2484.7895, "rmse": 49.8477, "r2": 0.8103}
+{"timestamp": "2026-05-16T20:09:27", "name": "RandomForest", "kind": "regression", "mse": 2368.0722, "rmse": 48.6628, "r2": 0.8192}
+{"timestamp": "2026-05-16T20:10:26", "name": "LightGBM", "kind": "regression", "mse": 2449.0373, "rmse": 49.4877, "r2": 0.8367}
+{"timestamp": "2026-05-16T20:10:29", "name": "XGBoost", "kind": "regression", "mse": 2703.3059, "rmse": 51.9933, "r2": 0.8197}
+{"timestamp": "2026-05-16T20:10:47", "name": "CatBoost", "kind": "regression", "mse": 2465.4956, "rmse": 49.6538, "r2": 0.8356}
+{"timestamp": "2026-05-16T20:11:23", "name": "RandomForest", "kind": "regression", "mse": 2375.454, "rmse": 48.7386, "r2": 0.8416}
+{"timestamp": "2026-05-18T19:55:37", "name": "LightGBM", "kind": "regression", "mse": 1346.3229, "rmse": 36.6923, "r2": 0.8428}
+{"timestamp": "2026-05-18T19:56:49", "name": "XGBoost", "kind": "regression", "mse": 1355.111, "rmse": 36.8118, "r2": 0.8418}
+{"timestamp": "2026-05-18T20:00:42", "name": "CatBoost", "kind": "regression", "mse": 1222.1208, "rmse": 34.9588, "r2": 0.8573}
+{"timestamp": "2026-05-18T20:09:55", "name": "RandomForest", "kind": "regression", "mse": 1362.925, "rmse": 36.9178, "r2": 0.8409}
+{"timestamp": "2026-05-18T20:09:58", "name": "Ridge", "kind": "regression", "mse": 1915.0666, "rmse": 43.7615, "r2": 0.7764}
+{"timestamp": "2026-05-18T20:10:01", "name": "Ridge-PCA", "kind": "regression", "mse": 8558.0377, "rmse": 92.5097, "r2": 0.0009}
+{"timestamp": "2026-05-18T20:10:06", "name": "Ridge-Poly", "kind": "regression", "mse": 1912.9697, "rmse": 43.7375, "r2": 0.7767}
+{"timestamp": "2026-05-18T20:10:11", "name": "Ridge-Poly2", "kind": "regression", "mse": 1911.7097, "rmse": 43.7231, "r2": 0.7768}
+{"timestamp": "2026-05-18T20:10:15", "name": "Ridge-HistMean", "kind": "regression", "mse": 1915.0666, "rmse": 43.7615, "r2": 0.7764}
+{"timestamp": "2026-05-18T20:23:27", "name": "LightGBM", "kind": "regression", "mse": 1346.3229, "rmse": 36.6923, "r2": 0.8428}
+{"timestamp": "2026-05-18T20:23:54", "name": "XGBoost", "kind": "regression", "mse": 1355.111, "rmse": 36.8118, "r2": 0.8418}
+{"timestamp": "2026-05-18T20:26:03", "name": "CatBoost", "kind": "regression", "mse": 1222.1208, "rmse": 34.9588, "r2": 0.8573}
+{"timestamp": "2026-05-18T20:31:26", "name": "RandomForest", "kind": "regression", "mse": 1362.925, "rmse": 36.9178, "r2": 0.8409}
+{"timestamp": "2026-05-18T20:31:28", "name": "Ridge", "kind": "regression", "mse": 1915.0666, "rmse": 43.7615, "r2": 0.7764}
+{"timestamp": "2026-05-18T20:31:30", "name": "Ridge-PCA", "kind": "regression", "mse": 8558.0377, "rmse": 92.5097, "r2": 0.0009}
+{"timestamp": "2026-05-18T20:31:32", "name": "Ridge-Poly", "kind": "regression", "mse": 1912.9697, "rmse": 43.7375, "r2": 0.7767}
+{"timestamp": "2026-05-18T20:31:35", "name": "Ridge-Poly2", "kind": "regression", "mse": 1911.7097, "rmse": 43.7231, "r2": 0.7768}
+{"timestamp": "2026-05-18T20:31:38", "name": "Ridge-HistMean", "kind": "regression", "mse": 1915.0666, "rmse": 43.7615, "r2": 0.7764}
+{"timestamp": "2026-05-18T20:31:43", "name": "Ridge-Nystroem", "kind": "regression", "mse": 8524.6026, "rmse": 92.3288, "r2": 0.0048}
+{"timestamp": "2026-05-18T20:32:22", "name": "Ordinal-LGBM", "kind": "regression", "mse": 3030.0308, "rmse": 55.0457, "r2": 0.6463}
+{"timestamp": "2026-05-18T20:33:20", "name": "Ordinal-LGBM-fine", "kind": "regression", "mse": 2787.5648, "rmse": 52.7974, "r2": 0.6746}
+{"timestamp": "2026-05-18T20:33:58", "name": "Ordinal-XGB", "kind": "regression", "mse": 3128.7078, "rmse": 55.9349, "r2": 0.6347}
+{"timestamp": "2026-05-18T20:37:06", "name": "Residual-LGBM-XGB", "kind": "regression", "mse": 1258.1889, "rmse": 35.471, "r2": 0.8531}
+{"timestamp": "2026-05-18T20:39:21", "name": "Residual-LGBM-Ridge", "kind": "regression", "mse": 1350.7989, "rmse": 36.7532, "r2": 0.8423}
+{"timestamp": "2026-05-18T20:39:47", "name": "Log-LGBM", "kind": "regression", "mse": 1404.5902, "rmse": 37.4779, "r2": 0.836}
+{"timestamp": "2026-05-18T20:39:49", "name": "Log-Ridge", "kind": "regression", "mse": 273720.8027, "rmse": 523.1833, "r2": -30.9553}
+{"timestamp": "2026-05-18T20:40:17", "name": "Log-XGB", "kind": "regression", "mse": 1428.1954, "rmse": 37.7915, "r2": 0.8333}
+{"timestamp": "2026-05-18T20:41:33", "name": "Hier-LGBM-LGBM", "kind": "regression", "mse": 1642.8864, "rmse": 40.5325, "r2": 0.8082}
+{"timestamp": "2026-05-18T20:42:17", "name": "Hier-LGBM-Ridge", "kind": "regression", "mse": 1895.8617, "rmse": 43.5415, "r2": 0.7787}
+{"timestamp": "2026-05-18T20:43:28", "name": "Hier-LGBM-XGB", "kind": "regression", "mse": 1626.5563, "rmse": 40.3306, "r2": 0.8101}
+{"timestamp": "2026-05-18T20:45:46", "name": "Stack-LGBM-XGB-CB", "kind": "regression", "mse": 1275.7613, "rmse": 35.7178, "r2": 0.8511}
+{"timestamp": "2026-05-18T20:47:33", "name": "Stack-LGBM-CB", "kind": "regression", "mse": 1272.2372, "rmse": 35.6684, "r2": 0.8515}
+{"timestamp": "2026-05-18T22:55:57", "name": "LightGBM", "kind": "regression", "mse": 1346.3229, "rmse": 36.6923, "r2": 0.8428}
+{"timestamp": "2026-05-18T22:57:05", "name": "XGBoost", "kind": "regression", "mse": 1355.111, "rmse": 36.8118, "r2": 0.8418}
+{"timestamp": "2026-05-18T23:00:47", "name": "CatBoost", "kind": "regression", "mse": 1222.1208, "rmse": 34.9588, "r2": 0.8573}
+{"timestamp": "2026-05-19T09:36:25", "name": "CB-705-4cls", "kind": "classification", "macro_f1": 0.7571, "f1_class_0": 0.822, "f1_class_1": 0.6182, "f1_class_2": 0.7775, "f1_class_3": 0.8106}
+{"timestamp": "2026-05-19T09:40:51", "name": "LGBM-705-4cls", "kind": "classification", "macro_f1": 0.7459, "f1_class_0": 0.8176, "f1_class_1": 0.6381, "f1_class_2": 0.7613, "f1_class_3": 0.7664}
+{"timestamp": "2026-05-19T09:45:42", "name": "XGB-705-4cls", "kind": "classification", "macro_f1": 0.742, "f1_class_0": 0.8085, "f1_class_1": 0.6292, "f1_class_2": 0.7613, "f1_class_3": 0.7688}
+{"timestamp": "2026-05-19T09:46:45", "name": "CB-L50k-4cls", "kind": "classification", "macro_f1": 0.7344, "f1_class_0": 0.7969, "f1_class_1": 0.5518, "f1_class_2": 0.7577, "f1_class_3": 0.8314}
+{"timestamp": "2026-05-19T09:47:45", "name": "LGBM-L50k-4cls", "kind": "classification", "macro_f1": 0.7291, "f1_class_0": 0.7908, "f1_class_1": 0.567, "f1_class_2": 0.7506, "f1_class_3": 0.808}
+{"timestamp": "2026-05-19T09:58:34", "name": "LogReg-705-Scaled", "kind": "classification", "macro_f1": 0.1627, "f1_class_0": 0.205, "f1_class_1": 0.347, "f1_class_2": 0.04, "f1_class_3": 0.0589}

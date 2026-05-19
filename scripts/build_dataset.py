@@ -1,7 +1,7 @@
 """
-Build dataset.parquet directly from monthly ZIP archives.
+Build dataset.parquet and dataset_with_weather.parquet in a single run.
 
-Merges former pipeline steps 1-4, 4-6 into a single script:
+Merges the full 5-step data pipeline into one script:
   1. Read daily CSVs from ZIP (no disk extraction)
   2. Translate German headers → English
   3. Filter to bus rows only (PRODUCT_ID == "Bus")
@@ -10,34 +10,46 @@ Merges former pipeline steps 1-4, 4-6 into a single script:
   6. Compute delays + cyclical time features
   7. Drop outlier delays (> 30 min or < -2 min)
   8. Add is_public_holiday (canton-aware Swiss holidays)
-  9. Write directly to dataset.parquet (snappy-compressed)
+  9. Compute prev_stop_delay (lag within trip) + dist_to_prev_stop (LV95 distance)
+  10. Write dataset.parquet (snappy-compressed)
+  11. Fetch hourly weather from Open-Meteo (if not already cached)
+  12. Join weather to dataset + drop unmatched rows → dataset_with_weather.parquet
 
 RAM-efficient: one CSV in memory per worker at a time.
-Resume-safe: skips already-converted CSVs.
+Resume-safe: skips already-converted CSVs and cached weather stations.
 """
 
 import os
 import sys
 import io
 import shutil
+import sqlite3
+import time
+import threading
 import argparse
 import subprocess
 from pathlib import Path
 from zipfile import ZipFile, BadZipFile
 
+import duckdb
 import holidays
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
+import requests
 from multiprocessing import Pool
+from pyproj import Transformer
+from scipy.spatial import KDTree
 
-ROOT       = Path(__file__).resolve().parent.parent
-ZIP_DIR    = ROOT / "data" / "compressed_data"
-TMP_DIR    = ROOT / "data" / "build_dataset_tmp"
-OUTPUT     = ROOT / "data" / "dataset.parquet"
-TMP_OUTPUT = Path(str(OUTPUT) + ".tmp")
+ROOT         = Path(__file__).resolve().parent.parent
+ZIP_DIR      = ROOT / "data" / "compressed_data"
+TMP_DIR      = ROOT / "data" / "build_dataset_tmp"
+OUTPUT       = ROOT / "data" / "swiss_bus_2025.parquet"
+TMP_OUTPUT   = Path(str(OUTPUT) + ".tmp")
+STATION_DATA = ROOT / "data" / "station_data.parquet"
+DATASET_IN   = OUTPUT  # used by weather-join phase
 
 TAU = 2 * np.pi
 
@@ -88,8 +100,138 @@ def _build_stop_coords():
     ))
 
 
+GPKG_PATH = ROOT / "data" / "traffic" / "belastung-personenverkehr-strasse_2056.gpkg"
+TRAFFIC_MAP_CACHE = ROOT / "data" / "_traffic_map_cache.parquet"
+
+
+def _build_stop_traffic_map():
+    """Return {stop_id: {traffic_dtv, traffic_msp, traffic_asp,
+                         traffic_heavy_share, traffic_peak_ratio}}
+    by spatial-joining each stop to the nearest road segment in the Swiss
+    road-traffic GPKG (LV95 rtree index).  Cached to a parquet file so it
+    only runs once.
+    """
+    if TRAFFIC_MAP_CACHE.exists():
+        cached = pq.read_table(TRAFFIC_MAP_CACHE).to_pandas()
+        out = {}
+        for row in cached.itertuples(index=False):
+            out[row.stop_id] = {
+                "traffic_dtv":         row.traffic_dtv,
+                "traffic_msp":         row.traffic_msp,
+                "traffic_asp":         row.traffic_asp,
+                "traffic_heavy_share": row.traffic_heavy_share,
+                "traffic_peak_ratio":  row.traffic_peak_ratio,
+            }
+        print(f"Loaded {len(out):,} traffic-mapped stops from cache")
+        return out
+
+    if not GPKG_PATH.exists():
+        print("WARNING: traffic GPKG not found — traffic features will be NaN")
+        return {}
+
+    coords = _build_stop_coords()
+    if not coords:
+        return {}
+
+    print(f"Building stop → road traffic map ({len(coords):,} stops)...")
+    t0 = time.time()
+
+    conn = sqlite3.connect(str(GPKG_PATH))
+    cur = conn.cursor()
+
+    search_radii = [500.0, 1000.0, 2000.0, 5000.0]
+    records = []
+    n = len(coords)
+    no_match = 0
+
+    for i, (stop_id, (east, north)) in enumerate(coords.items()):
+        nearest_dtv = nearest_msp = nearest_asp = nearest_lw = nearest_lz = None
+        found = False
+
+        for radius in search_radii:
+            cur.execute(f"""
+                SELECT r.id,
+                       MAX(r.minx - {east}, 0.0, {east} - r.maxx) AS dx,
+                       MAX(r.miny - {north}, 0.0, {north} - r.maxy) AS dy
+                FROM rtree_Personen_Gueterverkehr_Strasse_geom AS r
+                WHERE r.minx <= {east} + {radius}
+                  AND r.maxx >= {east} - {radius}
+                  AND r.miny <= {north} + {radius}
+                  AND r.maxy >= {north} - {radius}
+                ORDER BY dx * dx + dy * dy
+                LIMIT 1
+            """)
+            row = cur.fetchone()
+            if row is None:
+                continue
+
+            cur.execute(f"""
+                SELECT DTV_FZG, MSP_FZG, ASP_FZG, DTV_LW, DTV_LZ
+                FROM Personen_Gueterverkehr_Strasse
+                WHERE id = {row[0]}
+            """)
+            traffic = cur.fetchone()
+            if traffic is not None:
+                nearest_dtv, nearest_msp, nearest_asp, nearest_lw, nearest_lz = traffic
+                found = True
+                break
+
+        if not found:
+            no_match += 1
+            continue
+
+        heavy_share = (nearest_lw + nearest_lz) / nearest_dtv if nearest_dtv > 0 else 0.0
+        peak_ratio  = nearest_asp / nearest_dtv if nearest_dtv > 0 else 0.0
+
+        records.append({
+            "stop_id":            int(stop_id),
+            "traffic_dtv":        float(nearest_dtv),
+            "traffic_msp":        float(nearest_msp),
+            "traffic_asp":        float(nearest_asp),
+            "traffic_heavy_share": float(heavy_share),
+            "traffic_peak_ratio":  float(peak_ratio),
+        })
+
+        if (i + 1) % 5000 == 0:
+            elapsed = time.time() - t0
+            rate = (i + 1) / elapsed
+            print(f"  ... {i+1}/{n} stops ({(i+1)*100/n:.0f}%, "
+                  f"{rate:.0f} stops/s)")
+
+    conn.close()
+
+    df = pd.DataFrame(records)
+    # Ensure int32 for join compatibility
+    df["stop_id"] = df["stop_id"].astype("int32")
+    for col in ["traffic_dtv", "traffic_msp", "traffic_asp",
+                "traffic_heavy_share", "traffic_peak_ratio"]:
+        df[col] = df[col].astype("float32")
+
+    pq.write_table(
+        pa.Table.from_pandas(df, preserve_index=False),
+        TRAFFIC_MAP_CACHE,
+        compression="snappy",
+    )
+
+    elapsed = time.time() - t0
+    print(f"  Matched {len(df):,}/{n:,} stops ({no_match} no-match) "
+          f"in {elapsed:.1f}s ({n/elapsed:.0f} stops/s)")
+
+    out = {}
+    for row in df.itertuples(index=False):
+        out[row.stop_id] = {
+            "traffic_dtv":         row.traffic_dtv,
+            "traffic_msp":         row.traffic_msp,
+            "traffic_asp":         row.traffic_asp,
+            "traffic_heavy_share": row.traffic_heavy_share,
+            "traffic_peak_ratio":  row.traffic_peak_ratio,
+        }
+    return out
+
+
 STOP_CANTON   = _build_stop_canton_map()
 STOP_COORDS   = _build_stop_coords()
+STOP_TRAFFIC  = _build_stop_traffic_map()
 HOLIDAY_DATES = _build_holiday_dates()
 
 # German → English column mapping (full set, 21 columns)
@@ -166,8 +308,13 @@ EXPECTED_SCHEMA = pa.schema([
     ("departure_delay_s",  pa.int32()),
     ("is_public_holiday",  pa.bool_()),
     ("trip_id",            pa.large_string()),
+    ("trip_stop_index",     pa.int16()),
     ("prev_stop_delay",      pa.int32()),
     ("dist_to_prev_stop",   pa.float32()),
+    ("traffic_dtv",         pa.float32()),
+    ("traffic_heavy_share", pa.float32()),
+    ("traffic_peak_ratio",  pa.float32()),
+    ("traffic_peak",        pa.float32()),
 ])
 
 
@@ -377,6 +524,11 @@ def process_csv(args):
             .astype("Int32")
         )
 
+        # Position of each stop within its trip (0 = first stop)
+        result["trip_stop_index"] = result.groupby(
+            [ts_dates, "trip_id"], sort=False
+        ).cumcount().astype("int16")
+
         # dist_to_prev_stop: LV95 Euclidean distance (m) to previous stop in same trip
         if STOP_COORDS:
             coords_east, coords_north = zip(*[
@@ -416,6 +568,44 @@ def process_csv(args):
 
         if len(result) == 0:
             return csv_name, 0, 0, None
+
+        # ── Traffic features (nearest-road spatial join on GPKG) ──
+        if STOP_TRAFFIC:
+            # Drop rows for stops with no matching road segment
+            traffic_ids = {int(sid) for sid in STOP_TRAFFIC}
+            keep_mask = [int(sid) in traffic_ids for sid in result["stop_id"]]
+            keep_mask_arr = np.array(keep_mask)
+            result = {
+                col: values[keep_mask_arr]
+                for col, values in result.items()
+            }
+
+            traffic_rows = [STOP_TRAFFIC[int(sid)] for sid in result["stop_id"]]
+            result["traffic_dtv"] = np.array(
+                [t["traffic_dtv"] for t in traffic_rows], dtype="float32"
+            )
+            result["traffic_heavy_share"] = np.array(
+                [t["traffic_heavy_share"] for t in traffic_rows], dtype="float32"
+            )
+            result["traffic_peak_ratio"] = np.array(
+                [t["traffic_peak_ratio"] for t in traffic_rows], dtype="float32"
+            )
+            # traffic_peak: morning peak for AM, evening peak for PM
+            # timestamp is ms since epoch (Swiss-local-time-as-UTC)
+            msp_arr = np.array(
+                [t["traffic_msp"] for t in traffic_rows], dtype="float32"
+            )
+            asp_arr = np.array(
+                [t["traffic_asp"] for t in traffic_rows], dtype="float32"
+            )
+            ts_hour = pd.to_datetime(result["timestamp"], unit="ms").dt.hour
+            result["traffic_peak"] = np.where(
+                ts_hour.values < 12, msp_arr, asp_arr
+            ).astype("float32")
+        else:
+            for col in ["traffic_dtv", "traffic_peak",
+                         "traffic_heavy_share", "traffic_peak_ratio"]:
+                result[col] = np.nan
 
         n_rows = len(result)
 
@@ -527,6 +717,22 @@ def run_tests():
         if not ok:
             all_ok = False
 
+    # trip_stop_index — no NaN, all >= 0, min should be >= 1 (first stops are dropped)
+    tsi = df_out["trip_stop_index"]
+    tsi_nans = tsi.isna().sum()
+    ok = tsi_nans == 0 and len(tsi) > 0
+    print(f"  {'PASS' if ok else 'FAIL'}  trip_stop_index has {len(tsi):,} non-null values "
+          f"({tsi_nans:,} NaN)")
+    if not ok:
+        all_ok = False
+    if len(tsi):
+        tsi_min, tsi_max = tsi.min(), tsi.max()
+        ok_range = tsi_min >= 0 and tsi_max < 500
+        print(f"  {'PASS' if ok_range else 'FAIL'}  trip_stop_index in [0, 500)  "
+              f"(min={tsi_min} max={tsi_max})")
+        if not ok_range:
+            all_ok = False
+
     # dist_to_prev_stop — no NaN, no zeros, all >= 1m
     dists = df_out["dist_to_prev_stop"]
     dist_nans = dists.isna().sum()
@@ -537,6 +743,32 @@ def run_tests():
           f"min={dists.min():.0f}m  max={dists.max():.0f}m")
     if not ok:
         all_ok = False
+
+    # Traffic features — float32, allow small NaN rate (< 5%)
+    if STOP_TRAFFIC:
+        for col in ["traffic_dtv", "traffic_peak",
+                     "traffic_heavy_share", "traffic_peak_ratio"]:
+            col_nans = df_out[col].isna().sum()
+            col_valid = df_out[col].dropna()
+            nan_rate = col_nans / max(len(df_out), 1)
+            ok = nan_rate < 0.05 and len(col_valid) > 0
+            print(f"  {'PASS' if ok else 'FAIL'}  {col} has {len(col_valid):,} non-null "
+                  f"({col_nans:,} NaN, {nan_rate:.2%})")
+            if not ok:
+                all_ok = False
+            elif len(col_valid) > 0:
+                if col in ("traffic_heavy_share", "traffic_peak_ratio"):
+                    in_range = col_valid.between(0, 10).all()
+                    print(f"  {'PASS' if in_range else 'FAIL'}  {col} in [0, 10]  "
+                          f"(min={col_valid.min():.4f} max={col_valid.max():.4f})")
+                    if not in_range:
+                        all_ok = False
+                elif col == "traffic_dtv":
+                    ok_nonneg = (col_valid >= 0).all()
+                    print(f"  {'PASS' if ok_nonneg else 'FAIL'}  {col} >= 0  "
+                          f"(min={col_valid.min():.0f} max={col_valid.max():.0f})")
+                    if not ok_nonneg:
+                        all_ok = False
 
     # Public holiday is a boolean column with both values
     holiday_vals = df_out["is_public_holiday"].unique()
@@ -558,6 +790,344 @@ def run_tests():
     shutil.rmtree(TMP_DIR)
     print("All tests passed." if all_ok else "SOME TESTS FAILED.")
     return all_ok
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 2 — Fetch hourly weather from Open-Meteo (if not already cached)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+WEATHER_HOURLY = ROOT / "data" / "weather_hourly.parquet"
+STATION_META   = ROOT / "data" / "station_metadata.parquet"
+WEATHER_CACHE  = ROOT / "data" / "weather_hourly_cache"
+
+STAC_BASE    = "https://data.geo.admin.ch/api/stac/v0.9"
+COLLECTION   = "ch.meteoschweiz.ogd-smn"
+API_BASE     = "https://archive-api.open-meteo.com/v1/archive"
+
+HOURLY_VARS = [
+    "temperature_2m", "precipitation", "sunshine_duration",
+    "relative_humidity_2m", "wind_speed_10m", "wind_gusts_10m",
+    "wind_direction_10m", "surface_pressure", "snow_depth",
+]
+
+VAR_RENAME = {
+    "temperature_2m": "temperature", "precipitation": "precipitation",
+    "sunshine_duration": "sunshine", "relative_humidity_2m": "humidity",
+    "wind_speed_10m": "wind_speed", "wind_gusts_10m": "wind_gust",
+    "wind_direction_10m": "wind_dir", "surface_pressure": "pressure",
+    "snow_depth": "snow_depth",
+}
+
+WEATHER_SCHEMA = pa.schema([
+    ("station_id",    pa.string()),
+    ("timestamp",     pa.timestamp("s")),
+    ("temperature",   pa.float32()),
+    ("precipitation", pa.float32()),
+    ("sunshine",      pa.float32()),
+    ("humidity",      pa.float32()),
+    ("wind_speed",    pa.float32()),
+    ("wind_gust",     pa.float32()),
+    ("wind_dir",      pa.float32()),
+    ("pressure",      pa.float32()),
+    ("snow_depth",    pa.float32()),
+])
+
+
+def _get_weather_session():
+    s = requests.Session()
+    s.headers["User-Agent"] = "swiss-bus-delay-ml/1.0 (research)"
+    return s
+
+
+def _discover_weather_stations():
+    """Return list of {station_id, lat, lon} dicts, generating station_metadata
+    from the MeteoSwiss STAC API if not already cached."""
+    if STATION_META.exists():
+        meta = pq.read_table(STATION_META).to_pandas()
+        print(f"Loaded {len(meta)} stations from {STATION_META}")
+        return meta[["station_id", "lat", "lon"]].dropna().to_dict("records")
+
+    print("station_metadata.parquet not found — fetching from MeteoSwiss STAC API...")
+    session = _get_weather_session()
+    stations, url, params = [], f"{STAC_BASE}/collections/{COLLECTION}/items", {"limit": 100}
+    while url:
+        r = session.get(url, params=params, timeout=60)
+        r.raise_for_status()
+        data = r.json()
+        for feature in data.get("features", []):
+            coords = feature.get("geometry", {}).get("coordinates", [])
+            props  = feature.get("properties", {})
+            if len(coords) >= 2:
+                stations.append({
+                    "station_id": feature["id"],
+                    "name":       props.get("title", feature["id"]),
+                    "lon":        coords[0],
+                    "lat":        coords[1],
+                    "alt":        coords[2] if len(coords) > 2 else None,
+                })
+        url    = next((l["href"] for l in data.get("links", []) if l.get("rel") == "next"), None)
+        params = {}
+
+    meta_df = pd.DataFrame(stations)
+    pq.write_table(pa.Table.from_pandas(meta_df, preserve_index=False), STATION_META,
+                   compression="snappy")
+    print(f"Saved {STATION_META} ({len(stations)} stations)")
+    return meta_df[["station_id", "lat", "lon"]].dropna().to_dict("records")
+
+
+def _fetch_one_station(session, station, cache_dir):
+    """Fetch hourly weather for one station → cache parquet. Returns (station_id, rows, error)."""
+    sid      = station["station_id"]
+    pq_path  = cache_dir / f"{sid}.parquet"
+
+    if pq_path.exists():
+        return sid, -1, None
+
+    try:
+        params = {
+            "latitude":   round(station["lat"], 6),
+            "longitude":  round(station["lon"], 6),
+            "start_date": "2025-01-01",
+            "end_date":   "2025-12-31",
+            "hourly":     ",".join(HOURLY_VARS),
+            "timezone":   "UTC",
+        }
+
+        for attempt in range(6):
+            try:
+                r = session.get(API_BASE, params=params, timeout=60)
+                r.raise_for_status()
+                data = r.json()
+                break
+            except requests.HTTPError as e:
+                if r.status_code == 429:
+                    wait = int(r.headers.get("Retry-After", 30)) + 5
+                    print(f"  [{sid}] rate-limited, waiting {wait}s...")
+                    time.sleep(wait)
+                elif attempt == 5:
+                    raise
+                else:
+                    wait = 2 ** attempt
+                    print(f"  [{sid}] retry {attempt+1}/6 ({wait}s): {e}")
+                    time.sleep(wait)
+            except Exception as e:
+                if attempt == 5:
+                    raise
+                wait = 2 ** attempt
+                print(f"  [{sid}] retry {attempt+1}/6 ({wait}s): {e}")
+                time.sleep(wait)
+
+        time.sleep(1.0)  # rate-limit gap
+
+        hourly     = data["hourly"]
+        timestamps = pd.to_datetime(hourly["time"])
+
+        df = pd.DataFrame({"timestamp": timestamps})
+        df["station_id"] = sid
+
+        for var in HOURLY_VARS:
+            col  = VAR_RENAME[var]
+            vals = hourly.get(var, [None] * len(timestamps))
+            df[col] = pd.array(vals, dtype="Float64").astype("float32")
+
+        df["sunshine"]   = df["sunshine"]   / 3600.0   # s/h → fraction 0–1
+        df["wind_speed"] = df["wind_speed"] / 3.6      # km/h → m/s
+        df["wind_gust"]  = df["wind_gust"]  / 3.6      # km/h → m/s
+
+        ordered_cols = ["station_id", "timestamp"] + list(VAR_RENAME.values())
+        table = pa.Table.from_pandas(df[ordered_cols], schema=WEATHER_SCHEMA, preserve_index=False)
+        pq.write_table(table, pq_path, compression="snappy")
+        return sid, len(df), None
+
+    except Exception as e:
+        if pq_path.exists():
+            pq_path.unlink()
+        return sid, -1, str(e)
+
+
+def fetch_weather_if_needed():
+    """Fetch hourly weather from Open-Meteo for all MeteoSwiss stations if
+    weather_hourly.parquet doesn't already exist.  Resume-safe via per-station cache."""
+    if WEATHER_HOURLY.exists():
+        print(f"Weather already cached → {WEATHER_HOURLY}  ({WEATHER_HOURLY.stat().st_size / 1e6:.0f} MB)")
+        return
+
+    WEATHER_CACHE.mkdir(exist_ok=True)
+    stations = _discover_weather_stations()
+    cache_dir = WEATHER_CACHE
+
+    todo = [s for s in stations if not (cache_dir / f"{s['station_id']}.parquet").exists()]
+    n_cached = len(stations) - len(todo)
+    if n_cached:
+        print(f"Resuming weather fetch: {n_cached} cached, {len(todo)} remaining")
+
+    session = _get_weather_session()
+    done = n_cached
+    failed = []
+
+    for station in todo:
+        sid, rows, err = _fetch_one_station(session, station, cache_dir)
+        done += 1
+        tag = f"[{done}/{len(stations)}]"
+        if err:
+            failed.append((sid, err))
+            print(f"{tag} FAIL  {sid}: {err}")
+        else:
+            print(f"{tag} OK    {sid}: {rows:,} rows")
+
+    if failed:
+        print(f"\n{len(failed)} station(s) failed: {[s for s, _ in failed]}")
+
+    # Merge per-station parquets into one file
+    pq_files = sorted(cache_dir.glob("*.parquet"))
+    if not pq_files:
+        raise RuntimeError("No weather cache files to merge.")
+
+    print(f"\nMerging {len(pq_files)} station files → {WEATHER_HOURLY}")
+    tmp = WEATHER_HOURLY.with_suffix(".tmp.parquet")
+    with pq.ParquetWriter(tmp, WEATHER_SCHEMA, compression="snappy") as writer:
+        for path in pq_files:
+            writer.write_table(pq.read_table(path, schema=WEATHER_SCHEMA))
+    tmp.replace(WEATHER_HOURLY)
+    print(f"Done. {WEATHER_HOURLY}: {WEATHER_HOURLY.stat().st_size / 1e6:.1f} MB")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 3+4 — Join weather + drop missing → dataset_with_weather.parquet
+# ═══════════════════════════════════════════════════════════════════════════════
+
+DATASET_WITH_WEATHER = ROOT / "data" / "swiss_bus_2026_weather.parquet"
+STOP_MAP_TMP  = ROOT / "data" / "_stop_map_tmp.parquet"
+
+WEATHER_COLS = [
+    "temperature", "precipitation", "sunshine", "humidity",
+    "wind_speed", "wind_gust", "wind_dir", "pressure", "snow_depth",
+]
+
+
+def build_stop_station_map():
+    """Build {stop_id → weather_station_id} mapping via LV95→WGS84 + KDTree."""
+    print("\nBuilding stop → MeteoSwiss station map...")
+
+    stops = pq.read_table(
+        STATION_DATA, columns=["number", "lv95east", "lv95north"]
+    ).to_pandas().dropna(subset=["lv95east", "lv95north"])
+
+    stops["stop_id"] = pd.to_numeric(stops["number"], errors="coerce").astype("Int64")
+    stops = stops.dropna(subset=["stop_id"])
+
+    lon, lat = Transformer.from_crs("EPSG:2056", "EPSG:4326", always_xy=True).transform(
+        stops["lv95east"].to_numpy(),
+        stops["lv95north"].to_numpy(),
+    )
+    stops["lat"] = lat
+    stops["lon"] = lon
+
+    meta = pq.read_table(STATION_META, columns=["station_id", "lat", "lon"]).to_pandas().dropna()
+    _, indices = KDTree(meta[["lat", "lon"]].to_numpy()).query(stops[["lat", "lon"]].to_numpy())
+    stops["weather_station"] = meta["station_id"].iloc[indices].values
+
+    result = pd.DataFrame({
+        "stop_id":         stops["stop_id"].astype("int64"),
+        "weather_station": stops["weather_station"],
+    })
+    pq.write_table(pa.Table.from_pandas(result, preserve_index=False), STOP_MAP_TMP)
+    print(f"  Mapped {len(result):,} stops to MeteoSwiss stations")
+
+
+def join_weather_and_clean():
+    """DuckDB join: dataset.parquet + weather → dataset_with_weather.parquet.
+    Preserves prev_stop_delay and dist_to_prev_stop.  Drops rows where the
+    weather join did not match (the LEFT JOIN produces NULL weather columns)."""
+    if not STATION_DATA.exists():
+        raise FileNotFoundError(f"{STATION_DATA} required for weather join")
+
+    build_stop_station_map()
+
+    print("\nJoining dataset with weather (DuckDB, single pass)...")
+    tmp = DATASET_WITH_WEATHER.with_suffix(".tmp.parquet")
+
+    weather_cols_sql = ",\n                ".join(
+        f"w.{c}::FLOAT AS {c}" for c in WEATHER_COLS
+    )
+
+    con = duckdb.connect()
+    con.execute("SET threads = 2")
+    con.execute("SET memory_limit = '8GB'")
+
+    query = f"""
+        COPY (
+            SELECT
+                d.timestamp,
+                d.time_sin,  d.time_cos,
+                d.dow_sin,   d.dow_cos,
+                d.month_sin, d.month_cos,
+                d.is_weekend,
+                d.operator,  d.line,
+                d.stop_id,   d.stop_name,
+                d.additional_trip,
+                d.arrival_delay_s, d.departure_delay_s,
+                d.trip_id,
+                d.trip_stop_index,
+                d.prev_stop_delay,
+                d.dist_to_prev_stop,
+                d.traffic_dtv,
+                d.traffic_peak,
+                d.traffic_heavy_share,
+                d.traffic_peak_ratio,
+                d.is_public_holiday,
+                {weather_cols_sql}
+            FROM read_parquet('{DATASET_IN}') AS d
+            LEFT JOIN read_parquet('{STOP_MAP_TMP}') AS sm
+                ON d.stop_id = sm.stop_id
+            LEFT JOIN read_parquet('{WEATHER_HOURLY}') AS w
+                ON sm.weather_station = w.station_id
+               AND date_trunc('hour',
+                       (d.timestamp AT TIME ZONE 'Europe/Zurich')::TIMESTAMP
+                   ) = w.timestamp
+            WHERE NOT d.pass_through
+              AND d.prev_stop_delay IS NOT NULL
+              AND w.temperature IS NOT NULL
+        ) TO '{tmp}' (FORMAT PARQUET, COMPRESSION 'snappy', ROW_GROUP_SIZE 500000)
+    """
+
+    exc: list[Exception] = []
+
+    def _run():
+        try:
+            con.execute(query)
+        except Exception as e:
+            exc.append(e)
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    prev = 0
+    while thread.is_alive():
+        time.sleep(0.5)
+        cur = tmp.stat().st_size if tmp.exists() else 0
+        if cur != prev:
+            print(f"  writing... {cur / 1e9:.1f} GB", end="\r")
+            prev = cur
+
+    thread.join()
+    if exc:
+        STOP_MAP_TMP.unlink(missing_ok=True)
+        raise exc[0]
+
+    size_gb = tmp.stat().st_size / 1e9
+    print(f"  writing... {size_gb:.2f} GB")
+
+    tmp.replace(DATASET_WITH_WEATHER)
+    STOP_MAP_TMP.unlink(missing_ok=True)
+
+    # Print stats
+    rows_before = pq.read_metadata(DATASET_IN).num_rows
+    rows_after  = pq.read_metadata(DATASET_WITH_WEATHER).num_rows
+    dropped = rows_before - rows_after
+    print(f"Done → {DATASET_WITH_WEATHER} ({size_gb:.2f} GB)")
+    print(f"  {rows_before:,} → {rows_after:,} rows "
+          f"({dropped:,} dropped, {dropped * 100 / rows_before:.2f}%)")
 
 
 def main(workers):
@@ -641,15 +1211,34 @@ def main(workers):
     size_gb = os.path.getsize(OUTPUT) / 1e9
     print(f"\nDone. {OUTPUT}: {size_gb:.2f} GB")
 
+    # ═════════════════════════════════════════════════════════════════════════
+    # Phase 2 — Fetch hourly weather
+    # ═════════════════════════════════════════════════════════════════════════
+    print(f"\n{'='*60}\nPhase 2 — Fetch hourly weather\n{'='*60}")
+    fetch_weather_if_needed()
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # Phase 3+4 — Join weather + drop unmatched rows
+    # ═════════════════════════════════════════════════════════════════════════
+    print(f"\n{'='*60}\nPhase 3+4 — Join weather + clean\n{'='*60}")
+    join_weather_and_clean()
+
+    print(f"\n{'='*60}")
+    print(f"All phases complete.")
+    print(f"  {OUTPUT}: {size_gb:.2f} GB")
+    weather_size = os.path.getsize(DATASET_WITH_WEATHER) / 1e9
+    print(f"  {DATASET_WITH_WEATHER}: {weather_size:.2f} GB")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Build dataset.parquet directly from monthly ZIP archives"
+        description="Build dataset.parquet + dataset_with_weather.parquet "
+                    "from monthly ZIP archives"
     )
     parser.add_argument("--test",    action="store_true",
                         help="Run smoke test on first CSV then exit")
     parser.add_argument("--workers", type=int, default=4,
-                        help="Parallel workers (default: 4)")
+                        help="Parallel workers for CSV processing (default: 4)")
     args = parser.parse_args()
 
     if args.test:

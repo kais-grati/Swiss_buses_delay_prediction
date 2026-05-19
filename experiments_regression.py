@@ -7,6 +7,7 @@ from ml.preprocessors.target_encoder import HistoricalMeanEncoder
 from ml.preprocessors.weather_engineer import WeatherFeatureEngineer
 from ml.preprocessors.nystroem import NystroemExpander
 from ml.preprocessors.polynomial import PolynomialExpander
+from ml.preprocessors.poly_trig import PolyTrigExpander
 from ml.preprocessors.pca import PCAReducer
 from ml.models.lgbm import LightGBMModel
 from ml.models.xgboost_model import XGBoostModel
@@ -31,6 +32,45 @@ from config import (
 )
 
 experiments = {
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # BEST MODEL — Stack CB+Ridge
+    #   705: MSE=1219.14  RMSE=34.92s  R²=0.8577  (beats CatBoost 1222.12)
+    #   Lausanne 50k: MSE=2262.04  RMSE=47.56s  R²=0.8491  (beats Ridge 2321.78)
+    "Stack-CB-Ridge": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler(cols=[
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                    "hour", "dow", "month",
+                    "prev_stop_delay",
+                    "dist_to_prev_stop",
+                ]),
+            ],
+            model=StackingModel(
+                base_models=[
+                    CatBoostModel(
+                        n_estimators=1410,
+                        learning_rate=0.05149,
+                        depth=10,
+                        l2_leaf_reg=1.968,
+                        random_strength=0.03778,
+                        bagging_temperature=0.7664,
+                        min_data_in_leaf=72,
+                        early_stopping_rounds=50,
+                    ),
+                    RidgeModel(alpha=19.1791),
+                ],
+                meta_model=RidgeModel(alpha=1.0),
+                n_folds=5,
+            ),
+        ),
+        evaluator=evaluator,
+    ),
     "LightGBM": Experiment(
         loader=loader_lag,
         pipeline=MLPipeline(
@@ -81,6 +121,8 @@ experiments = {
         ),
         evaluator=evaluator,
     ),
+    # Previously best single model on 705 — MSE=1222.12  RMSE=34.96s  R²=0.8573
+    # Now superseded by Stack-CB-Ridge above
     "CatBoost": Experiment(
         loader=loader_lag,
         pipeline=MLPipeline(
@@ -120,6 +162,7 @@ experiments = {
         ),
         evaluator=evaluator,
     ),
+    # BEST on Lausanne 50k — MSE=2321.78  R²=0.8452  α=19.18
     "Ridge": Experiment(
         loader=loader_lag,
         pipeline=MLPipeline(
@@ -135,7 +178,7 @@ experiments = {
                     "dist_to_prev_stop",
                 ]),
             ],
-            model=RidgeModel(alpha=2.882),
+            model=RidgeModel(alpha=19.1791),
         ),
         evaluator=evaluator,
     ),
@@ -159,7 +202,7 @@ experiments = {
         ),
         evaluator=evaluator,
     ),
-    "Ridge-Poly2": Experiment(
+    "Ridge-Poly": Experiment(
         loader=loader_lag,
         pipeline=MLPipeline(
             preprocessors=[
@@ -177,6 +220,30 @@ experiments = {
                     "temperature", "precipitation", "sunshine", "humidity",
                     "wind", "pressure", "hour", "dow",
                 ], degree=2),
+            ],
+            model=RidgeModel(alpha=2.882),
+        ),
+        evaluator=evaluator,
+    ),
+    "Ridge-Poly2": Experiment(
+        loader=loader_lag,
+        pipeline=MLPipeline(
+            preprocessors=[
+                TemporalFeatureExtractor(),
+                WindMerger(),
+                StringEncoder(cols=["operator", "line"]),
+                FeatureScaler(cols=[
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "snow_depth",
+                    "hour", "dow", "month",
+                    "prev_stop_delay",
+                    "dist_to_prev_stop",
+                ]),
+                PolyTrigExpander(cols=[
+                    "temperature", "precipitation", "sunshine", "humidity",
+                    "wind", "pressure", "hour", "dow",
+                ])
+                
             ],
             model=RidgeModel(alpha=2.882),
         ),

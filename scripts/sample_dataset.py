@@ -25,7 +25,6 @@ import sys
 
 import duckdb
 import numpy as np
-import pandas as pd
 
 
 def reservoir_sample(path: str, output: str, n: int, seed: int) -> int:
@@ -44,58 +43,45 @@ def stratified_sample(
 ) -> int:
     """Sample proportionally within quantile bins of `stratify_on`.
 
-    Reads only the stratify column to compute bin edges, then uses a single
-    DuckDB query with row_number() per stratum. The full dataset is streamed,
-    never fully loaded into memory.
+    Computes bin edges via DuckDB approx_quantile (no pandas load), then does
+    one reservoir-sample query per stratum and unions the results. Each step is
+    bounded in memory — no full-column loads, no sort-based window functions.
     """
-    # 1. Read just the stratify column to compute bin edges
-    series = duckdb.query(
-        f"SELECT {stratify_on} FROM read_parquet('{path}')"
-    ).df()[stratify_on]
+    # 1. Compute quantile edges entirely in DuckDB (avoids loading full column)
+    quantile_points = [i / n_bins for i in range(n_bins + 1)]
+    qs = ", ".join(f"approx_quantile({stratify_on}, {q})" for q in quantile_points)
+    row = duckdb.query(f"SELECT {qs} FROM read_parquet('{path}')").fetchone()
+    edges = sorted(set(float(v) for v in row if v is not None))
+    n_bins = len(edges) - 1
 
-    total_rows = len(series)
-
-    # 2. Bin into quantiles
-    n_bins = min(n_bins, series.nunique())
-    if n_bins < 2:
-        print(f"  Column '{stratify_on}' has only {series.nunique()} unique value(s) — "
-              f"falling back to reservoir sampling.")
+    if n_bins < 1:
+        print(f"  Column '{stratify_on}' has too few distinct values — falling back to reservoir.")
         return reservoir_sample(path, output, n, seed)
 
-    try:
-        bins = pd.qcut(series, q=n_bins, duplicates="drop", retbins=True)[1]
-    except ValueError:
-        bins = pd.cut(series, bins=n_bins, retbins=True)[1]
-    n_bins = len(bins) - 1
-    del series
-
-    edges = [float(b) for b in bins]
     print(f"  {n_bins} strata from {stratify_on}: edges = {[f'{e:.1f}' for e in edges]}")
 
-    # 3. Count rows per stratum via DuckDB (consistent counting)
-    when_clauses = []
-    for i in range(n_bins):
+    # 2. Build per-stratum WHERE conditions
+    def stratum_cond(i: int) -> str:
         lo, hi = edges[i], edges[i + 1]
         if i == 0:
-            cond = f"{stratify_on} <= {hi}"
-        elif i == n_bins - 1:
-            cond = f"{stratify_on} > {lo}"
-        else:
-            cond = f"{stratify_on} > {lo} AND {stratify_on} <= {hi}"
-        when_clauses.append(f"WHEN {cond} THEN {i}")
+            return f"{stratify_on} <= {hi}"
+        if i == n_bins - 1:
+            return f"{stratify_on} > {lo}"
+        return f"{stratify_on} > {lo} AND {stratify_on} <= {hi}"
 
+    # 3. Count rows per stratum via DuckDB
+    when_clauses = [f"WHEN {stratum_cond(i)} THEN {i}" for i in range(n_bins)]
     case_expr = f"CASE {' '.join(when_clauses)} END"
     stratum_counts = duckdb.query(
         f"SELECT {case_expr} AS stratum, count(*) AS cnt "
         f"FROM read_parquet('{path}') "
-        f"GROUP BY stratum ORDER BY stratum"
+        f"GROUP BY stratum HAVING stratum IS NOT NULL ORDER BY stratum"
     ).df()
 
     # 4. Proportional allocation (at least 1 row per stratum)
     counts = stratum_counts["cnt"].values
     props = counts / counts.sum()
     per_stratum = np.maximum(1, (props * n).round().astype(int))
-    # Adjust to hit target n exactly
     diff = n - per_stratum.sum()
     while diff != 0:
         idx = per_stratum.argmax() if diff > 0 else per_stratum.argmin()
@@ -107,22 +93,22 @@ def stratified_sample(
         lo, hi = edges[i], edges[i + 1]
         print(f"    Stratum {i} ({lo:.0f}, {hi:.0f}]: {count:,} → {target:,}")
 
-    # 5. Single-query stratified sample via row_number() per stratum
-    duckdb.query(f"SELECT setseed({seed} * 0.371)")  # deterministic random() for reproducibility
-    limits = ",".join(str(int(x)) for x in per_stratum)
-    duckdb.query(f"""
-        COPY (
-            SELECT * EXCLUDE (_stratum, _rn) FROM (
-                SELECT *,
-                    {case_expr} AS _stratum,
-                    row_number() OVER (
-                        PARTITION BY _stratum ORDER BY random()
-                    ) AS _rn
-                FROM read_parquet('{path}')
-            )
-            WHERE _rn <= list_value({limits})[_stratum + 1]
-        ) TO '{output}' (FORMAT PARQUET)
-    """)
+    # 5. Per-stratum reservoir sampling — no window functions, bounded memory.
+    #    Each sub-query does one filtered scan + reservoir sample; DuckDB streams
+    #    the UNION ALL directly to the output file without materialising it.
+    union_parts = []
+    for i in range(n_bins):
+        k = int(per_stratum[i])
+        cond = stratum_cond(i)
+        union_parts.append(
+            f"SELECT * FROM ("
+            f"SELECT * FROM read_parquet('{path}') WHERE {cond}"
+            f") USING SAMPLE {k} ROWS (reservoir, {seed + i})"
+        )
+
+    duckdb.query(
+        f"COPY ({' UNION ALL '.join(union_parts)}) TO '{output}' (FORMAT PARQUET)"
+    )
 
     return n
 

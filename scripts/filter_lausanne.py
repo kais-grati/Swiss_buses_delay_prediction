@@ -1,3 +1,4 @@
+import argparse
 import os
 import duckdb
 
@@ -12,9 +13,15 @@ MUNICIPALITIES = [
     "Lausanne",
 ]
 
-OUTPUT = "data/lausanne_region.parquet"
-SOURCE = "data/dataset_with_weather.parquet"
-STATIONS = "data/station_data.parquet"
+parser = argparse.ArgumentParser()
+parser.add_argument("input", help="Path to input parquet file")
+parser.add_argument("-o", "--output", default="data/lausanne_region.parquet", help="Output parquet path (default: data/lausanne_region.parquet)")
+parser.add_argument("--stations", default="data/station_data.parquet", help="Path to station_data parquet (default: data/station_data.parquet)")
+args = parser.parse_args()
+
+OUTPUT = args.output
+SOURCE = args.input
+STATIONS = args.stations
 
 # Cap DuckDB at 2 GB RAM — it will spill to temp_directory instead of crashing
 con = duckdb.connect()

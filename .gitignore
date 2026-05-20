@@ -1,13 +1,33 @@
-
+# Data files (large, not tracked)
 *.csv
 *.zip
 *.parquet
-/graphify-out
+/data/*
+!/data/*.md
+
+# Sensitive
+.env
 CLAUDE.md
 /.claude
-/__pycache__
-*.tmp
+
+# Build artifacts
+__pycache__/
 *.pyc
+*.tmp
+*.pyo
 /catboost_info
-/saved_models
-/data
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Graphify
+/graphify-out
+
+# Virtual environment
+venv/
+.venv/

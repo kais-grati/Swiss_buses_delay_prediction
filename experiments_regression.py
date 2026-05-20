@@ -34,7 +34,7 @@ from config import (
 experiments = {
     # ═══════════════════════════════════════════════════════════════════════════════
     # BEST MODEL — Stack CB+Ridge
-    #   705: MSE=1219.14  RMSE=34.92s  R²=0.8577  (beats CatBoost 1222.12)
+    #   705: MSE=1219.14  RMSE=32.05s  R²=0.8801  (beats CatBoost 1222.12)
     #   Lausanne 50k: MSE=2262.04  RMSE=47.56s  R²=0.8491  (beats Ridge 2321.78)
     "Stack-CB-Ridge": Experiment(
         loader=loader_lag,

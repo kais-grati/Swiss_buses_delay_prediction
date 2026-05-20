@@ -1,0 +1,92 @@
+{
+  "exported_at": "2026-05-19 17:57:45",
+  "models": [
+    {
+      "name": "Regression CatBoost 705",
+      "path": "saved_models/regression_catboost_705",
+      "task": "regression",
+      "dataset": "705",
+      "metrics": {
+        "rmse": 32.06,
+        "r2": 0.88
+      },
+      "model_type": "CatBoostModel",
+      "preprocessors": [
+        "TemporalFeatureExtractor",
+        "WindMerger",
+        "StringEncoder(operator,line)"
+      ]
+    },
+    {
+      "name": "Regression Stack-CB-Ridge 705",
+      "path": "saved_models/regression_stack_cb_ridge_705",
+      "task": "regression",
+      "dataset": "705",
+      "metrics": {
+        "rmse": 32.05,
+        "r2": 0.8801
+      },
+      "model_type": "StackingModel(CatBoost+Ridge)",
+      "preprocessors": [
+        "TemporalFeatureExtractor",
+        "WindMerger",
+        "StringEncoder(operator,line)",
+        "FeatureScaler"
+      ]
+    },
+    {
+      "name": "Classification CatBoost 705 4-class",
+      "path": "saved_models/classification_catboost_705_4cls",
+      "task": "classification",
+      "dataset": "705",
+      "bins": [
+        60,
+        120,
+        300
+      ],
+      "class_names": [
+        "\u226460s",
+        "60\u2013120s",
+        "120\u2013300s",
+        ">300s"
+      ],
+      "metrics": {
+        "macro_f1": 0.7936,
+        "accuracy": 0.7915
+      },
+      "model_type": "CatBoostClassifierModel",
+      "preprocessors": [
+        "TemporalFeatureExtractor",
+        "WindMerger",
+        "StringEncoder(operator,line)"
+      ]
+    },
+    {
+      "name": "Classification CatBoost Lausanne 50k 4-class",
+      "path": "saved_models/classification_catboost_lausanne50k_4cls",
+      "task": "classification",
+      "dataset": "lausanne_50k",
+      "bins": [
+        60,
+        120,
+        300
+      ],
+      "class_names": [
+        "\u226460s",
+        "60\u2013120s",
+        "120\u2013300s",
+        ">300s"
+      ],
+      "metrics": {
+        "macro_f1": 0.7337,
+        "accuracy": 0.7228
+      },
+      "model_type": "CatBoostClassifierModel",
+      "preprocessors": [
+        "TemporalFeatureExtractor",
+        "WindMerger",
+        "StringEncoder(operator,line)"
+      ]
+    }
+  ]
+}

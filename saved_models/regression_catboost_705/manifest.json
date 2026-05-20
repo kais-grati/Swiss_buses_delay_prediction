@@ -1,0 +1,4 @@
+{
+  "model_type": "CatBoostModel",
+  "n_preprocessors": 3
+}

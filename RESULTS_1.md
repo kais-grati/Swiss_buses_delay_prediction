@@ -1,4 +1,4 @@
-The following classification experiments were performed on the dataset without the delays at the previous stop and distance to previous stop features. Regression results were poor same for multi class classification. The best I managed to get was for binary classification were the class boundary was a delay threshold (180s).
+The following classification experiments were performed on the dataset without the delays at the previous stop, distance to previous stop and stop trip index features. Regression results were poor same for multi class classification. The best I managed to get was for binary classification were the class boundary was a delay threshold (180s).
 
 _______________________________________________________________
 

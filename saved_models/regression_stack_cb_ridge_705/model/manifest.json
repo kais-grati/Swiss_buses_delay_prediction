@@ -1,0 +1,9 @@
+{
+  "type": "StackingModel",
+  "n_folds": 5,
+  "base_models": [
+    "CatBoostModel",
+    "RidgeModel"
+  ],
+  "meta_model": "RidgeModel"
+}

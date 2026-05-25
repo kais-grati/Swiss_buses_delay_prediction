@@ -69,10 +69,16 @@ function renderDepartures(departures, onSelect) {
     div.style.cssText = 'padding:10px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;';
     div.addEventListener('click', () => onSelect(dep));
     const time = dep.scheduled.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+    let delayHtml = '';
+    if (dep.hasRealtime) {
+      const d = dep.delaySeconds;
+      const color = d > 60 ? 'var(--red)' : d <= 0 ? 'var(--green)' : 'var(--yellow)';
+      delayHtml = `<div style="font-size:0.8rem;color:${color}">${d >= 0 ? '+' : ''}${d}s</div>`;
+    }
     div.innerHTML = `
       <div><strong>${dep.line}</strong> → ${dep.destination}
         <div style="font-size:0.75rem;color:var(--text-dim);">${dep.operator}</div></div>
-      <div style="text-align:right;"><div style="font-size:1.1rem;">${time}</div></div>`;
+      <div style="text-align:right;"><div style="font-size:1.1rem;">${time}</div>${delayHtml}</div>`;
     els.departureList.appendChild(div);
   });
 }
@@ -81,6 +87,9 @@ function fillFormFromDeparture(dep) {
   els.operatorInput.value = dep.operator || '';
   els.lineInput.value = dep.line || '';
   els.datetimeInput.value = toLocalDatetimeString(dep.scheduled);
+  if (dep.delaySeconds != null) {
+    els.prevDelayInput.value = Math.max(0, dep.delaySeconds);
+  }
 }
 
 const CLASS_NAMES = ['≤60s', '60–120s', '120–300s', '>300s'];

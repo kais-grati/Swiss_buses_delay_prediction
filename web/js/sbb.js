@@ -1,36 +1,50 @@
 // web/js/sbb.js
-// SBB timetable API via search.ch (public, no API key required)
+// Swiss public transport API (transport.opendata.ch) — free, no key, CORS-enabled
 
-const SBB_AUTOCOMPLETE_URL = 'https://timetable.search.ch/api/completion.json';
-const SBB_STATIONBOARD_URL = 'https://timetable.search.ch/api/stationboard.json';
+const API_BASE = 'https://transport.opendata.ch/v1';
 
 async function searchStops(query) {
   if (query.length < 2) return [];
-  const url = `${SBB_AUTOCOMPLETE_URL}?query=${encodeURIComponent(query)}`;
+  const url = `${API_BASE}/locations?query=${encodeURIComponent(query)}&type=station`;
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`SBB autocomplete failed: ${response.status}`);
+  if (!response.ok) throw new Error(`Stop search failed: ${response.status}`);
   const data = await response.json();
-  return (data || []).slice(0, 10).map((item) => ({
-    name: item.label,
-    label: item.label,
-    id: item.label,
-  }));
+  return (data.stations || [])
+    .filter(s => s.id)  // only stops with real IDs (exclude address matches)
+    .slice(0, 15)
+    .map(s => ({
+      name: s.name,
+      label: s.name,
+      id: s.id,
+      icon: s.icon || 'station',
+    }));
 }
 
 async function fetchDepartures(stopName, limit = 20) {
-  const url = `${SBB_STATIONBOARD_URL}?stop=${encodeURIComponent(stopName)}&limit=${limit}`;
+  const url = `${API_BASE}/stationboard?station=${encodeURIComponent(stopName)}&limit=${limit}&type=bus`;
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`SBB stationboard failed: ${response.status}`);
+  if (!response.ok) throw new Error(`Departures failed: ${response.status}`);
   const data = await response.json();
 
-  return (data.connections || []).map(entry => ({
-    scheduled: new Date(entry.time),
-    operator: entry.operator || '',
-    line: entry.line || '',
-    destination: entry.terminal ? entry.terminal.name : '',
-    stopName: data.stop ? data.stop.name : stopName,
-    stopId: data.stop ? data.stop.id : null,
-  }));
+  return (data.stationboard || []).map(entry => {
+    const stop = entry.stop;
+    const scheduled = new Date(stop.departure);
+    const hasRealtime = stop.prognosis && stop.prognosis.departure;
+    const estimated = hasRealtime ? new Date(stop.prognosis.departure) : null;
+    const delaySeconds = estimated ? Math.round((estimated - scheduled) / 1000) : null;
+
+    return {
+      scheduled,
+      estimated,
+      delaySeconds: hasRealtime ? delaySeconds : null,
+      hasRealtime: !!hasRealtime,
+      operator: entry.operator || '',
+      line: entry.number || '',
+      destination: entry.to || '',
+      stopName: stop.station ? stop.station.name : stopName,
+      stopId: stop.station ? stop.station.id : null,
+    };
+  });
 }
 
 export { searchStops, fetchDepartures };

@@ -4,10 +4,10 @@
 
 Machine learning models that predict how late a bus will be at each stop, using weather conditions, traffic data, upstream delays, and stop position within the trip. The best model achieves **R² = 0.88** on a dataset of 483,000+ observations covering a full year of Swiss bus operations.
 
-<table><tr>
-  <td align="center"><img src="docs/charts/regression_leaderboard_705.png" alt="Regression Leaderboard"></td>
-  <td align="center"><img src="docs/charts/classification_leaderboard_705.png" alt="Classification Leaderboard"></td>
-</tr></table>
+<p align="center">
+  <img src="docs/charts/regression_leaderboard_705.png" alt="Regression Leaderboard"><br>
+  <img src="docs/charts/classification_leaderboard_705.png" alt="Classification Leaderboard">
+</p>
 
 ## Quick Results
 
@@ -117,10 +117,10 @@ The input `df` must contain the columns from the Swiss bus dataset (see [Data Pi
 
 Full schema, feature descriptions, and data sources are documented in **[docs/DATASETS.md](docs/DATASETS.md)**. The datasets are built from open Swiss public transport data ([SBB Istdaten](https://data.opentransportdata.swiss/dataset/istdaten)), [Open-Meteo](https://open-meteo.com/) weather, and ASTRA traffic counts. See [PIPELINE.md](PIPELINE.md) for the end-to-end build process.
 
-<table><tr>
-  <td align="center"><img src="docs/charts/feature_importance.png" alt="Feature Importance"></td>
-  <td align="center"><img src="docs/charts/performance_evolution.png" alt="Performance Evolution"></td>
-</tr></table>
+<p align="center">
+  <img src="docs/charts/feature_importance.png" alt="Feature Importance"><br>
+  <img src="docs/charts/performance_evolution.png" alt="Performance Evolution">
+</p>
 
 ## Citation
 

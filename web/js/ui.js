@@ -69,14 +69,10 @@ function renderDepartures(departures, onSelect) {
     div.style.cssText = 'padding:10px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;';
     div.addEventListener('click', () => onSelect(dep));
     const time = dep.scheduled.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
-    const delayStr = dep.hasRealtime
-      ? `<span style="color:${dep.delaySeconds > 60 ? 'var(--red)' : 'var(--green)'}">${dep.delaySeconds >= 0 ? '+' : ''}${dep.delaySeconds}s</span>`
-      : '<span style="color:var(--text-dim)">no data</span>';
     div.innerHTML = `
       <div><strong>${dep.line}</strong> → ${dep.destination}
         <div style="font-size:0.75rem;color:var(--text-dim);">${dep.operator}</div></div>
-      <div style="text-align:right;"><div style="font-size:1.1rem;">${time}</div>
-        <div style="font-size:0.8rem;">${delayStr}</div></div>`;
+      <div style="text-align:right;"><div style="font-size:1.1rem;">${time}</div></div>`;
     els.departureList.appendChild(div);
   });
 }
@@ -85,9 +81,6 @@ function fillFormFromDeparture(dep) {
   els.operatorInput.value = dep.operator || '';
   els.lineInput.value = dep.line || '';
   els.datetimeInput.value = toLocalDatetimeString(dep.scheduled);
-  if (dep.delaySeconds !== null) {
-    els.prevDelayInput.value = Math.max(0, dep.delaySeconds);
-  }
 }
 
 const CLASS_NAMES = ['≤60s', '60–120s', '120–300s', '>300s'];
@@ -117,7 +110,7 @@ function showClassification(probs) {
   }
 }
 
-function showSummary(delaySeconds, sbbDelaySeconds) {
+function showSummary(delaySeconds) {
   let level, text;
   if (delaySeconds <= 60) { level = 'green'; text = 'Smooth trip expected'; }
   else if (delaySeconds <= 120) { level = 'yellow'; text = 'Minor delay likely'; }
@@ -125,11 +118,7 @@ function showSummary(delaySeconds, sbbDelaySeconds) {
   else { level = 'red'; text = 'Major delay — plan ahead'; }
   els.summaryBanner.textContent = text;
   els.summaryBanner.className = 'summary ' + level;
-  if (sbbDelaySeconds !== null && sbbDelaySeconds !== undefined) {
-    els.sbbCompare.innerHTML = `SBB reports <strong>${sbbDelaySeconds >= 0 ? '+' : ''}${sbbDelaySeconds}s</strong> departure delay | Model predicts <strong>${Math.round(delaySeconds) >= 0 ? '+' : ''}${Math.round(delaySeconds)}s</strong> arrival delay`;
-  } else {
-    els.sbbCompare.innerHTML = 'No SBB real-time data available for this trip.';
-  }
+  els.sbbCompare.innerHTML = `Predicted arrival delay: <strong>${Math.round(delaySeconds) >= 0 ? '+' : ''}${Math.round(delaySeconds)}s</strong>`;
   els.resultsSection.style.display = 'block';
 }
 

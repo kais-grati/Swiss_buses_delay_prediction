@@ -23,26 +23,14 @@ async function fetchDepartures(stopName, limit = 20) {
   if (!response.ok) throw new Error(`SBB stationboard failed: ${response.status}`);
   const data = await response.json();
 
-  return (data.stationboard || []).map(entry => {
-    const dep = entry.stop.departure;
-    const scheduled = new Date(dep.scheduled);
-    const prognosis = dep.prognosis;
-    const estimated = prognosis ? new Date(prognosis.departure) : null;
-    const delaySeconds = estimated ? Math.round((estimated - scheduled) / 1000) : null;
-    const hasRealtime = !!(prognosis && prognosis.realtime);
-
-    return {
-      scheduled,
-      estimated,
-      delaySeconds: hasRealtime ? delaySeconds : null,
-      operator: dep.operator || '',
-      line: dep.line || entry.name || '',
-      destination: entry.to || '',
-      stopName: dep.station ? dep.station.name : stopName,
-      stopId: dep.station ? dep.station.id : null,
-      hasRealtime,
-    };
-  });
+  return (data.connections || []).map(entry => ({
+    scheduled: new Date(entry.time),
+    operator: entry.operator || '',
+    line: entry.line || '',
+    destination: entry.terminal ? entry.terminal.name : '',
+    stopName: data.stop ? data.stop.name : stopName,
+    stopId: data.stop ? data.stop.id : null,
+  }));
 }
 
 export { searchStops, fetchDepartures };

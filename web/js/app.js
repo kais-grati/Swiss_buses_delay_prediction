@@ -11,7 +11,6 @@ import {
 
 let encoderMap = {};
 let trafficMedians = {};
-let selectedSbbDelay = null;
 
 async function init() {
   initUI();
@@ -60,7 +59,6 @@ function wireEvents() {
             const deps = await fetchDepartures(stop.name || stop.label);
             renderDepartures(deps, (dep) => {
               fillFormFromDeparture(dep);
-              selectedSbbDelay = dep.delaySeconds;
               document.getElementById('departure-list').innerHTML = '';
             });
           } catch (e) {
@@ -121,7 +119,7 @@ async function handlePredict() {
 
     showRegression(delay);
     showClassification(probs);
-    showSummary(delay, selectedSbbDelay);
+    showSummary(delay);
     document.getElementById('results-section').scrollIntoView({ behavior: 'smooth' });
   } catch (e) {
     showError('Prediction failed: ' + e.message);

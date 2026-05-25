@@ -10,10 +10,10 @@ async function searchStops(query) {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`SBB autocomplete failed: ${response.status}`);
   const data = await response.json();
-  return (data || []).slice(0, 10).map((item, i) => ({
-    name: item,
-    label: item,
-    id: `stop_${i}`,
+  return (data || []).slice(0, 10).map((item) => ({
+    name: item.label,
+    label: item.label,
+    id: item.label,
   }));
 }
 
